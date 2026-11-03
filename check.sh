@@ -634,15 +634,25 @@ function MediaUnlockTest_Dazn() {
 }
 
 function MediaUnlockTest_HuluJP() {
-    # id.hulu.jp serves its login page to Japanese IPs and 403 to everything else.
-    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 -o /dev/null -w '%{http_code}' "https://id.hulu.jp/" -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' -H 'Accept-Language: ja,en-US;q=0.9,en;q=0.8' 2>/dev/null)
+    # id.hulu.jp serves its login page to Japanese IPs, and 403 or a redirect to a "restrict" page to everything else.
+    # It resets requests that do not look like a browser navigation, so these headers are required.
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -fsL --max-time 10 -o /dev/null -w '%{http_code}_TAG_%{url_effective}\n' "https://id.hulu.jp/" -H 'Accept: */*;q=0.8' -H 'Accept-Language: en-US,en;q=0.5' -H 'Accept-Encoding: none' -H 'Sec-GPC: 1' -H 'Upgrade-Insecure-Requests: 1' -H 'Sec-Fetch-Dest: document' -H 'Sec-Fetch-Mode: navigate' -H 'Sec-Fetch-Site: none' -H 'Sec-Fetch-User: ?1' -H 'Priority: u=1' 2>/dev/null)
+    local httpcode=$(echo "$tmpresult" | awk -F'_TAG_' '{print $1}')
+    local urleffective=$(echo "$tmpresult" | awk -F'_TAG_' '{print $2}')
 
-    case "$tmpresult" in
-        '200') echo -n -e "\r Hulu Japan:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n" ;;
-        '403') echo -n -e "\r Hulu Japan:\t\t\t\t${Font_Red}No${Font_Suffix}\n" ;;
-        '000' | '') print_network_failure "Hulu Japan:\t\t\t\t" "$1" "id.hulu.jp" ;;
-        *) echo -n -e "\r Hulu Japan:\t\t\t\t${Font_Red}Failed (Error: ${tmpresult})${Font_Suffix}\n" ;;
-    esac
+    if [[ "$httpcode" == "000" ]] || [ -z "$httpcode" ]; then
+        print_network_failure "Hulu Japan:\t\t\t\t" "$1" "id.hulu.jp"
+        return
+    fi
+    if [[ "$urleffective" == *"restrict"* ]] || [[ "$httpcode" == "403" ]]; then
+        echo -n -e "\r Hulu Japan:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
+        return
+    fi
+    if [[ "$httpcode" == "200" ]]; then
+        echo -n -e "\r Hulu Japan:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
+        return
+    fi
+    echo -n -e "\r Hulu Japan:\t\t\t\t${Font_Red}Failed (Error: ${httpcode})${Font_Suffix}\n"
 }
 
 function MediaUnlockTest_MyTVSuper() {
