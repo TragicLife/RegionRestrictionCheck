@@ -2804,9 +2804,9 @@ function MediaUnlockTest_VideoMarket() {
 }
 
 function MediaUnlockTest_J:COM_ON_DEMAND() {
-	local result=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -fsL --write-out %{http_code} --output /dev/null --max-time 10 "https://id.zaq.ne.jp" 2>&1)
+	local result=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -fsL --write-out %{http_code} --output /dev/null --max-time 10 "https://auth.id2.zaq.ne.jp" 2>&1)
 	if [ "$result" = "000" ]; then
-        print_network_failure "J:com On Demand:\t\t\t" "$1" "id.zaq.ne.jp"
+        print_network_failure "J:com On Demand:\t\t\t" "$1" "auth.id2.zaq.ne.jp"
     elif [ "$result" = "404" ]; then
         echo -n -e "\r J:com On Demand:\t\t\t${Font_Green}Yes${Font_Suffix}\n"
     elif [ "$result" = "403" ]; then
