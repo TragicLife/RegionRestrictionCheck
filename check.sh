@@ -1464,18 +1464,21 @@ function MediaUnlockTest_HotStar() {
     if [ "$result" = "000" ]; then
         print_network_failure "HotStar:\t\t\t\t" "$1" "api.hotstar.com"
         return
-    elif [ "$result" = "401" ]; then
-        local region=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} -sI "https://www.hotstar.com" | grep 'geo=' | sed 's/.*geo=//' | cut -f1 -d",")
-        local site_region=$(curl $curlArgs -${1} -s -o /dev/null -L --max-time 10 -w '%{url_effective}\n' "https://www.hotstar.com" | sed 's@.*com/@@' | tr [:lower:] [:upper:])
-        if [ -n "$region" ] && [ "$region" = "$site_region" ]; then
-            echo -n -e "\r HotStar:\t\t\t\t${Font_Green}Yes (Region: $region)${Font_Suffix}\n"
-            return
-        else
-            echo -n -e "\r HotStar:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
+    elif [ "$result" = "401" ] || [ "$result" = "475" ]; then
+        # The geo cookie carries the detected country even where HotStar is not served (475).
+        local region=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} -sI --max-time 10 "https://www.hotstar.com" | grep 'geo=' | sed 's/.*geo=//' | cut -f1 -d",")
+        local region_note=""
+        [ -n "$region" ] && region_note=" (Region: $region)"
+        if [ "$result" = "475" ]; then
+            echo -n -e "\r HotStar:\t\t\t\t${Font_Red}No${region_note}${Font_Suffix}\n"
             return
         fi
-    elif [ "$result" = "475" ]; then
-        echo -n -e "\r HotStar:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
+        local site_region=$(curl $curlArgs -${1} -s -o /dev/null -L --max-time 10 -w '%{url_effective}\n' "https://www.hotstar.com" | sed 's@.*com/@@' | tr [:lower:] [:upper:])
+        if [ -n "$region" ] && [ "$region" = "$site_region" ]; then
+            echo -n -e "\r HotStar:\t\t\t\t${Font_Green}Yes${region_note}${Font_Suffix}\n"
+        else
+            echo -n -e "\r HotStar:\t\t\t\t${Font_Red}No${region_note}${Font_Suffix}\n"
+        fi
         return
     else
         echo -n -e "\r HotStar:\t\t\t\t${Font_Red}Failed${Font_Suffix}\n"
@@ -1606,7 +1609,7 @@ function MediaUnlockTest_FridayVideo() {
 
 function MediaUnlockTest_FuboTV() {
     local radom_num=${RANDOM:0-1}
-    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 "https://api.fubo.tv/appconfig/v1/homepage?platform=web&client_version=R20230310.${radom_num}&nav=v0"2>&1)
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 "https://api.fubo.tv/appconfig/v1/homepage?platform=web&client_version=R20230310.${radom_num}&nav=v0" 2>&1)
     if [[ "$tmpresult" == "curl"* ]]; then
         print_network_failure "Fubo TV:\t\t\t\t" "$1" "api.fubo.tv"
         return
@@ -1880,25 +1883,39 @@ function MediaUnlockTest_Sky_CH() {
 }
 
 function MediaUnlockTest_Starz() {
-    local authorization=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -s --max-time 10 "https://www.starz.com/sapi/header/v1/starz/us/09b397fc9eb64d5080687fc8a218775b" -H "Referer: https://www.starz.com/us/en/" 2>&1)
-    local tmpresult=$(curl $curlArgs -${1} -s --max-time 10 "https://auth.starz.com/api/v4/User/geolocation" -H "AuthTokenAuthorization: $authorization")
-    if [ -z "$tmpresult" ]; then
+    # Based on https://github.com/oneclickvirt/UnlockTests/blob/main/us/Starz.go
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS --max-time 10 -w '\n%{http_code}' "https://www.starz.com/sapi/header/v1/starz/us/109448574b2147ccbc494b429ff5ef1b" -H "Referer: https://www.starz.com/us/en/" 2>&1)
+    if [[ "$tmpresult" == "curl"* ]]; then
+        print_network_failure "Starz:\t\t\t\t\t" "$1" "www.starz.com"
+        return
+    fi
+    local httpcode=${tmpresult##*$'\n'}
+    local authorization=${tmpresult%$'\n'*}
+    if [[ "$httpcode" == "403" ]]; then
+        echo -n -e "\r Starz:\t\t\t\t\t${Font_Red}No  (Banned)${Font_Suffix}\n"
+        return
+    fi
+    if [ -z "$authorization" ] || [[ "$authorization" == *"AccessDenied"* ]]; then
+        echo -n -e "\r Starz:\t\t\t\t\t${Font_Red}Failed (Unexpected Result: $httpcode)${Font_Suffix}\n"
+        return
+    fi
+
+    local tmpresult2=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS --max-time 10 "https://auth.starz.com/api/v4/User/geolocation" \
+        -H "AuthTokenAuthorization: $authorization" \
+        -H "BestAvailableToken: true" \
+        -H "Origin: https://www.starz.com" \
+        -H "Referer: https://www.starz.com/" \
+        -H "X-Client-Features: DeviceCount" 2>&1)
+    if [[ "$tmpresult2" == "curl"* ]]; then
         print_network_failure "Starz:\t\t\t\t\t" "$1" "auth.starz.com"
         return
     fi
 
-    local isAllowedAccess=$(echo $tmpresult | json_query . | grep isAllowedAccess | awk '{print $2}' | cut -f1 -d",")
-    local isAllowedCountry=$(echo $tmpresult | json_query . | grep isAllowedCountry | awk '{print $2}' | cut -f1 -d",")
-    local isKnownProxy=$(echo $tmpresult | json_query . | grep isKnownProxy | awk '{print $2}' | cut -f1 -d",")
-    if [[ "$isAllowedAccess" == "true" ]] && [[ "$isAllowedCountry" == "true" ]] && [[ "$isKnownProxy" == "false" ]]; then
+    local verdict=$(echo "$tmpresult2" | json_query -r 'if (.isAllowedAccess == true and .isAllowedCountry == true and .isKnownProxy == false) then "yes" else "no" end')
+    if [[ "$verdict" == "yes" ]]; then
         echo -n -e "\r Starz:\t\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
-        return
-    elif [[ "$isAllowedAccess" == "false" ]]; then
+    elif [[ "$verdict" == "no" ]]; then
         echo -n -e "\r Starz:\t\t\t\t\t${Font_Red}No${Font_Suffix}\n"
-        return
-    elif [[ "$isKnownProxy" == "false" ]]; then
-        echo -n -e "\r Starz:\t\t\t\t\t${Font_Red}No${Font_Suffix}\n"
-        return
     else
         echo -n -e "\r Starz:\t\t\t\t\t${Font_Red}Failed${Font_Suffix}\n"
     fi
@@ -2843,15 +2860,32 @@ function MediaUnlockTest_Instagram.Music() {
 }
 
 function MediaUnlockTest_Popcornflix(){
-    local result=$(curl $curlArgs -${1} -s --user-agent "${UA_Browser}" --write-out %{http_code} --output /dev/null --max-time 10 "https://popcornflix-prod.cloud.seachange.com/cms/popcornflix/clientconfiguration/versions/2" 2>&1)
-    if [ "$result" = "000" ]; then
-        print_network_failure "Popcornflix:\t\t\t\t" "$1" "popcornflix-prod.cloud.seachange.com"
-    elif [ "$result" = "403" ]; then
-        echo -n -e "\r Popcornflix:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
-    elif [ "$result" = "200" ]; then
-        echo -n -e "\r Popcornflix:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
+    # Relaunched on Future Today's platform: the app config reports the detected country,
+    # and the library is licensed for the US only.
+    local api="https://popcornflix.com/home/new/v444/api"
+    local query="appId=9&siteId=1518&auth-token=1217575&deviceId=f4565b54-f556-5ce7-b656-5e7af756600d&apiEnv=production"
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS --max-time 10 -H "Referer: https://popcornflix.com/" "${api}/getSecurityToken.php?&${query}" 2>&1)
+    if [[ "$tmpresult" == "curl"* ]]; then
+        print_network_failure "Popcornflix:\t\t\t\t" "$1" "popcornflix.com"
+        return
+    fi
+    local token=$(echo "$tmpresult" | json_query -r '.securityToken // empty')
+    if [ -z "$token" ]; then
+        echo -n -e "\r Popcornflix:\t\t\t\t${Font_Red}Failed (Error: PAGE ERROR)${Font_Suffix}\n"
+        return
+    fi
+    local config=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS --max-time 10 -H "Referer: https://popcornflix.com/" -H "X-Requested-With: XMLHttpRequest" -H "token: ${token}" "${api}/index.php?parent=home&${query}" 2>&1)
+    if [[ "$config" == "curl"* ]]; then
+        print_network_failure "Popcornflix:\t\t\t\t" "$1" "popcornflix.com"
+        return
+    fi
+    local region=$(echo "$config" | json_query -r '.countryCode // empty')
+    if [[ "$region" == "US" ]]; then
+        echo -n -e "\r Popcornflix:\t\t\t\t${Font_Green}Yes (Region: US)${Font_Suffix}\n"
+    elif [ -n "$region" ]; then
+        echo -n -e "\r Popcornflix:\t\t\t\t${Font_Red}No (Region: ${region})${Font_Suffix}\n"
     else
-        echo -n -e "\r Popcornflix:\t\t\t\t${Font_Red}Failed (Unexpected Result: $result)${Font_Suffix}\n"
+        echo -n -e "\r Popcornflix:\t\t\t\t${Font_Red}Failed${Font_Suffix}\n"
     fi
 }
 
@@ -3139,37 +3173,85 @@ function MediaUnlockTest_NBCTV(){
     fi
 }
 
-function MediaUnlockTest_Crackle(){
-    local tmpresult=$(curl $curlArgs -${1} -sS -I --user-agent "${UA_Browser}" --max-time 10 "https://prod-api.crackle.com/appconfig" 2>&1 | grep -E 'x-crackle-region:|curl')
-    if [[ "$tmpresult" == "curl"* ]]; then
-        print_network_failure "Crackle:\t\t\t\t" "$1" "prod-api.crackle.com"
-        return
-    elif [ -z "$tmpresult" ]; then
-        echo -n -e "\r Crackle:\t\t\t\t${Font_Red}Failed${Font_Suffix}\n"
-        return
-    fi
-    local result=$(echo $tmpresult | awk '{print $2}' | sed 's/[[:space:]]//g')
-    if [[ "$result" == "US" ]]; then
-        echo -n -e "\r Crackle:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
-    else
-        echo -n -e "\r Crackle:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
-    fi
-}
-
 function MediaUnlockTest_AETV(){
-    local tmpresult=$(curl $curlArgs -${1} -sS -X POST --user-agent "${UA_Browser}" --max-time 10 "https://ccpa-service.sp-prod.net/ccpa/consent/10265/display-dns" 2>&1)
-    if [[ "$tmpresult" == "curl"* ]]; then
-        print_network_failure "A&E TV:\t\t\t\t" "$1" "ccpa-service.sp-prod.net"
+    # Based on https://github.com/oneclickvirt/UnlockTests/blob/main/us/AETV.go
+    # Each step falls through to the next when it cannot reach a verdict.
+    local ua_edge="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0"
+    local video_meta_token="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3Njk2NzU2NDAsImV4cCI6MTc2OTY3OTI0MCwicHBsSWQiOiIzMDU0ODkiLCJpc0JlaGluZFdhbGwiOmZhbHNlLCJpc0xvbmdGb3JtIjp0cnVlLCJlbmNvZGVyIjoiYml0bW92aW5fdjEiLCJyZW5kaXRpb25zTGlzdCI6bnVsbCwicmVuZGl0aW9uc1BhdGhQcmVmaXgiOiJiaXRtb3Zpbi9BRVROLUFFVFZfVk1TL0FFTl9PWlJLXzMwNTQ4OV9HTEJfNDkzNjY5XzIzOThfNjBfMjAyNTAxMDRfMDFfQUVUTi1BRVRWX1ZNUyIsInJlZ2lvbnNBdmFpbGFibGUiOlsiVVMiLCJDQSIsIkFTIiwiR1UiLCJNUCIsIlBSIiwiVkkiLCJVTSJdfQ._IBIJ-Yh8X9hGOGglCNQWcW6WZKrUbjTNQ8Rdon8u_A"
+    local dai_data='dai-dlid=default_delivery_60101&afid=59946479&adobe_id=17218268117322661452685981206066538688&asnw=171213&caid=305489&imafw__fw_ae=nonauthenticated&imafw__fw_vcid2=2395239744222918&devicename=Desktop&imafw_csid=aetv.desktop.video&imafw__fw_player_height=901&imafw__fw_player_width=474&imafw__fw_us_privacy=1---&imafw__fw_site_page=https%3A%2F%2Fplay.aetv.com%2Fshows%2Fozark-law%2Fseason-1%2Fepisode-1&ltd=1&imafw__fw_h_user_agent=Mozilla%2F5.0%20(Windows%20NT%2010.0%3B%20Win64%3B%20x64)%20AppleWebKit%2F537.36%20(KHTML%2C%20like%20Gecko)%20Chrome%2F144.0.0.0%20Safari%2F537.36%20Edg%2F144.0.0.0&imafw_prof=171213%3Aaetn_desktop_ae_googlessai_vod&metr=1031&nw=171213&pvrn=7469863039993294&ssnw=171213&vprn=7469863039993294&flag=%2Bsltp%2Bvicb%2Bslcb%2Bamsl%2Bamcb%2Bssus%2Bemcr%2Bfbad%2Bdtrd%2Bplay&resp=vmap1&cld=1&ctv=0&correlator=3412237903465914&ptt=20&osd=2&sdr=1&sdki=41&sdkv=h.3.740.0&uach=WyJXaW5kb3dzIiwiMTUuMC4wIiwieDg2IiwiIiwiMTQ0LjAuMzcxOS45MiIsbnVsbCwwLG51bGwsIjY0IixbWyJOb3QoQTpCcmFuZCIsIjguMC4wLjAiXSxbIkNocm9taXVtIiwiMTQ0LjAuNzU1OS45NyJdLFsiTWljcm9zb2Z0IEVkZ2UiLCIxNDQuMC4zNzE5LjkyIl1dLDBd&ua=Mozilla%2F5.0%20(Windows%20NT%2010.0%3B%20Win64%3B%20x64)%20AppleWebKit%2F537.36%20(KHTML%2C%20like%20Gecko)%20Chrome%2F144.0.0.0%20Safari%2F537.36%20Edg%2F144.0.0.0&eid=44751890%2C95322027%2C95331589%2C95332046&frm=0&omid_p=Google1%2Fh.3.740.0&sdk_apis=7&sid=6C436384-F48F-4AEA-8FCA-9F3633757A74&ssss=gima&ref=https%3A%2F%2Fplay.aetv.com%2Fshows%2Fozark-law%2Fseason-1%2Fepisode-1&url=https%3A%2F%2Fplay.aetv.com%2Fshows%2Fozark-law%2Fseason-1%2Fepisode-1&wta=0&us_privacy=1---&gpp_sid=-1&eoidce=1'
+
+    # Step 1: Google DAI stream -> Argus API. JWTExpiredSignature means the geo check already passed.
+    local dai=$(curl $curlArgs -${1} --user-agent "${ua_edge}" -sS --max-time 10 -X POST "https://dai.google.com/ondemand/hls/content/2540935/vid/2400478275868/streams" \
+        -H "accept: */*" \
+        -H "content-type: application/x-www-form-urlencoded;charset=UTF-8" \
+        -H "origin: https://play.aetv.com" \
+        -H "referer: https://play.aetv.com/" \
+        --data "$dai_data" 2>&1)
+    local manifest=$(echo "$dai" | json_query -r '.stream_manifest // empty')
+    # originpath is kept URL-encoded, as it is passed on as a query value again.
+    local origin_path=$(echo "$manifest" | sed -n 's/.*[?&]originpath=\([^&]*\).*/\1/p')
+    if [ -n "$origin_path" ]; then
+        local argus=$(curl $curlArgs -${1} --user-agent "${ua_edge}" -sS --max-time 10 -w '\n%{http_code}' \
+            "https://argus.media.aetnd.com/?bestCdn=fastly&brand=aetv&client=tve-web-theo&dfpOp=${origin_path}&sig=00697b29892c60831e3de250beaec91bd6ab73901a0ffb723b533130425058484d6c62" \
+            -H "accept: */*" \
+            -H "origin: https://play.aetv.com" \
+            -H "referer: https://play.aetv.com/" \
+            -H "x-video-meta-token: ${video_meta_token}" 2>&1)
+        if [[ "${argus##*$'\n'}" == "403" ]]; then
+            local exception=$(echo "${argus%$'\n'*}" | json_query -r '.exception // empty')
+            if [[ "$exception" == "GeoLocationBlocked" ]]; then
+                echo -n -e "\r A&E TV:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
+                return
+            elif [[ "$exception" == "JWTExpiredSignature" ]]; then
+                echo -n -e "\r A&E TV:\t\t\t\t${Font_Green}Yes (Region: US)${Font_Suffix}\n"
+                return
+            fi
+        fi
+    fi
+
+    # Step 2: country code in the homepage meta tag.
+    local homepage=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 "https://www.aetv.com/" 2>&1)
+    local homepage_failed=""
+    [[ "$homepage" == "curl"* ]] && homepage_failed=1
+    local region=$(echo "$homepage" | sed -n -E "s/.*<meta[[:space:]]+name=[\"']aetn:countryCode[\"'][[:space:]]+content=[\"']([A-Z]{2})[\"'].*/\1/p" | head -n 1)
+    if [[ "$region" == "US" ]]; then
+        echo -n -e "\r A&E TV:\t\t\t\t${Font_Green}Yes (Region: US)${Font_Suffix}\n"
+        return
+    elif [ -n "$region" ]; then
+        echo -n -e "\r A&E TV:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
         return
     fi
-    local result=$(echo $tmpresult | json_query . | grep '"ccpaApplies":' | cut -f1 -d',' | awk '{print $2}')
-    if [[ "$result" == "true" ]]; then
-        echo -n -e "\r A&E TV:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
-    elif [[ "$result" == "false" ]]; then
-        echo -n -e "\r A&E TV:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
-    else
-        echo -n -e "\r A&E TV:\t\t\t\t${Font_Red}Failed${Font_Suffix}\n"
+
+    # Step 3: geolocation used by the site's privacy manager.
+    local geo_country=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS --max-time 10 "https://geo.privacymanager.io/" 2>&1 | json_query -r '.country // empty')
+    if [[ "$geo_country" == "US" ]] || [[ "$geo_country" == "CA" ]]; then
+        echo -n -e "\r A&E TV:\t\t\t\t${Font_Green}Yes (Region: ${geo_country})${Font_Suffix}\n"
+        return
     fi
+
+    # Step 4: thePlatform reports geo blocking explicitly.
+    local platform=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS --max-time 10 -X POST "https://link.theplatform.com/s/xc6n8B/UR27JDU0bu2s/" 2>&1)
+    if [[ "$platform" == *"GeoLocationBlocked"* ]]; then
+        echo -n -e "\r A&E TV:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
+        return
+    fi
+
+    # Step 5: country cookie set by play.aetv.com.
+    local play=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS -i --max-time 10 -X POST "https://play.aetv.com/" 2>&1)
+    local play_region=$(echo "$play" | sed -n -E 's/.*AETN-Country-Code=([A-Z]+).*/\1/p' | head -n 1)
+    if [[ "$play_region" == "US" ]] || [[ "$play_region" == "CA" ]]; then
+        echo -n -e "\r A&E TV:\t\t\t\t${Font_Green}Yes (Region: ${play_region})${Font_Suffix}\n"
+        return
+    elif [ -n "$play_region" ]; then
+        echo -n -e "\r A&E TV:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
+        return
+    fi
+
+    if [ -n "$homepage_failed" ] && [[ "$play" == "curl"* ]]; then
+        print_network_failure "A&E TV:\t\t\t\t" "$1" "www.aetv.com"
+        return
+    fi
+    echo -n -e "\r A&E TV:\t\t\t\t${Font_Red}Failed${Font_Suffix}\n"
 }
 
 function MediaUnlockTest_NFLPlus() {
@@ -4094,7 +4176,7 @@ function MediaUnlockTest_BingSearch() {
     # A cookie jar is needed: bing.com first redirects to /?brdr=1 and expects the cookie back.
     local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL -b "" --max-time 10 -w '\n%{http_code}' "https://www.bing.com" 2>&1)
     if [[ "$tmpresult" == "curl"* ]]; then
-        print_network_failure "BingSearch:\t\t\t\t" "$1" "www.bing.com"
+        print_network_failure "Bing:\t\t\t\t" "$1" "www.bing.com"
         return
     fi
     local httpcode=${tmpresult##*$'\n'}
@@ -4210,6 +4292,37 @@ function MediaUnlockTest_Apple() {
     echo -n -e "\r Apple:\t\t\t\t\t${Font_Red}No  (Region: ${region^^})${Font_Suffix}\n"
 }
 
+function MediaUnlockTest_Facebook() {
+    local cookiejar=$(mktemp)
+    local fbArgs=(--user-agent "${UA_Browser}" -sS --max-time 10 -b "$cookiejar" -c "$cookiejar" -H 'accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' -H 'accept-language: en-US,en;q=0.9' -H 'sec-fetch-dest: document' -H 'sec-fetch-mode: navigate' -H 'sec-fetch-site: none' -H 'sec-fetch-user: ?1' -H 'upgrade-insecure-requests: 1')
+    local tmpresult=$(curl $curlArgs -${1} "${fbArgs[@]}" "https://www.facebook.com/ads/library/" 2>&1)
+    if [[ "$tmpresult" == "curl"* ]]; then
+        rm -f "$cookiejar"
+        print_network_failure "Facebook:\t\t\t\t" "$1" "www.facebook.com"
+        return
+    fi
+    # The first visit may return a JS challenge that POSTs to a verify URL and reloads.
+    local verify=$(echo "$tmpresult" | grep -o "/__rd_verify_[^'\"]*" | head -n1)
+    if [ -n "$verify" ]; then
+        curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS --max-time 10 -b "$cookiejar" -c "$cookiejar" -X POST -o /dev/null "https://www.facebook.com${verify}" 2>/dev/null
+        tmpresult=$(curl $curlArgs -${1} "${fbArgs[@]}" -L "https://www.facebook.com/ads/library/" 2>&1)
+    fi
+    rm -f "$cookiejar"
+    if [[ "$tmpresult" == "curl"* ]]; then
+        print_network_failure "Facebook:\t\t\t\t" "$1" "www.facebook.com"
+        return
+    fi
+    local region=$(echo "$tmpresult" | grep -o '"AdsCurrentUser",\[\],{[^}]*"countryCode":"[A-Z]\{2\}"' | grep -o '"countryCode":"[A-Z]\{2\}"' | head -n1 | cut -d'"' -f4)
+    if [ -z "$region" ]; then
+        region=$(echo "$tmpresult" | grep -o '"defaultCountry":"[A-Z]\{2\}"' | head -n1 | cut -d'"' -f4)
+    fi
+    if [ -n "$region" ]; then
+        echo -n -e "\r Facebook:\t\t\t\t${Font_Green}Yes (Region: ${region})${Font_Suffix}\n"
+        return
+    fi
+    echo -n -e "\r Facebook:\t\t\t\t${Font_Red}Failed (Unknown Region)${Font_Suffix}\n"
+}
+
 
 function echo_Result() {
     for((i=0;i<${#array[@]};i++))
@@ -4247,7 +4360,6 @@ function NA_UnlockTest() {
     local result=$(
     run_check MediaUnlockTest_Shudder ${1} &
     run_check MediaUnlockTest_BritBox ${1} &
-    run_check MediaUnlockTest_Crackle ${1} &
     run_check MediaUnlockTest_CWTV ${1} &
     run_check MediaUnlockTest_AETV ${1} &
     run_check MediaUnlockTest_NBATV ${1} &
@@ -4255,7 +4367,7 @@ function NA_UnlockTest() {
     run_check MediaUnlockTest_TubiTV ${1} &
     )
     wait
-    local array=("Shudder:" "BritBox:" "Crackle:" "CW TV:" "A&E TV:" "NBA TV:")
+    local array=("Shudder:" "BritBox:" "CW TV:" "A&E TV:" "NBA TV:")
     echo_Result ${result} ${array}
     run_check MediaUnlockTest_NBCTV ${1}
     echo "$result" | grep "Fubo TV:"
@@ -4498,6 +4610,7 @@ function Global_UnlockTest() {
         run_check MediaUnlockTest_Reddit ${1} &
         run_check MediaUnlockTest_X ${1} &
         run_check MediaUnlockTest_Apple ${1} &
+        run_check MediaUnlockTest_Facebook ${1} &
         run_check MediaUnlockTest_Spotify ${1} &
         # MediaUnlockTest_Instagram.Music ${1}
         run_check GameTest_Steam ${1} &
@@ -4525,6 +4638,7 @@ function Global_UnlockTest() {
         run_check MediaUnlockTest_Reddit ${1} &
         run_check MediaUnlockTest_X ${1} &
         run_check MediaUnlockTest_Apple ${1} &
+        run_check MediaUnlockTest_Facebook ${1} &
         run_check MediaUnlockTest_Spotify ${1} &
         # MediaUnlockTest_Instagram.Music ${1}
         # GameTes t_Steam ${1} &
@@ -4535,7 +4649,7 @@ function Global_UnlockTest() {
         )
     fi
     wait
-    local array=("Dazn:" "HotStar:" "Disney+:" "Netflix:" "YouTube Premium:" "Amazon Prime Video:" "TVBAnywhere+:" "iQyi Oversea:" "Bilibili Anime:" "Viu.com:" "Tiktok" "YouTube CDN:" "Google Location:" "Google Play Store:" "Google Gemini:" "YouTube Region:" "Netflix Preferred CDN:" "Wikipedia" "BingSearch:" "Reddit:" "X (formerly Twitter):" "Apple:" "Spotify" "Steam Currency:" "Instagram")
+    local array=("Dazn:" "HotStar:" "Disney+:" "Netflix:" "YouTube Premium:" "Amazon Prime Video:" "TVBAnywhere+:" "iQyi Oversea:" "Bilibili Anime:" "Viu.com:" "Tiktok" "YouTube CDN:" "Google Location:" "Google Play Store:" "Google Gemini:" "YouTube Region:" "Netflix Preferred CDN:" "Wikipedia" "BingSearch:" "Reddit:" "X (formerly Twitter):" "Apple:" "Facebook:" "Spotify" "Steam Currency:" "Instagram")
     echo_Result ${result} ${array}
     echo "======================================="
 }
