@@ -287,26 +287,45 @@ run_check() {
 # the local connection can fail for a version the egress still has, or succeed
 # through the other one. The next service is tried when one is unreachable before
 # concluding that the IP version has no connectivity.
+# Set DEBUG=1 to trace each request: curl command, exit code, connected address,
+# HTTP status and response. The trace is printed by CheckV4, as the menu clears the
+# screen after this runs.
 # $1: 4 or 6
 get_public_ip() {
-    local ip url urls
+    local ip url urls raw rc
     if [[ "$1" == "4" ]]; then
         urls=("https://api4.ipify.org" "https://ipv4.icanhazip.com")
     else
         urls=("https://api6.ipify.org" "https://ipv6.icanhazip.com")
     fi
     for url in "${urls[@]}"; do
-        ip=$(curl $curlArgs -s --max-time 5 --user-agent "${UA_Browser}" "$url" 2>/dev/null | tr -d '[:space:]')
+        if [ -n "$DEBUG" ]; then
+            echo "[get_public_ip] IPv${1}: curl $curlArgs -sS --max-time 5 $url" >&2
+            raw=$(curl $curlArgs -sS --max-time 5 --user-agent "${UA_Browser}" -w '\n[remote_ip=%{remote_ip} http_code=%{http_code}]' "$url" 2>&1)
+            rc=$?
+            echo "[get_public_ip] IPv${1}: exit $rc, response: $(printf '%s' "$raw" | head -c 300 | tr '\n' ' ')" >&2
+            raw=$(printf '%s\n' "$raw" | sed '$d')
+        else
+            raw=$(curl $curlArgs -s --max-time 5 --user-agent "${UA_Browser}" "$url" 2>/dev/null)
+        fi
+        ip=$(printf '%s' "$raw" | tr -d ' \t\n\r\v\f')
         if [[ "$1" == "4" && "$ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || [[ "$1" == "6" && "$ip" =~ ^[0-9A-Fa-f:]+$ && "$ip" == *:* ]]; then
+            [ -n "$DEBUG" ] && echo "[get_public_ip] IPv${1}: using $ip" >&2
             echo "$ip"
             return
         fi
+        [ -n "$DEBUG" ] && echo "[get_public_ip] IPv${1}: '$ip' is not an IPv${1} address" >&2
     done
+    [ -n "$DEBUG" ] && echo "[get_public_ip] IPv${1}: no address found" >&2
 }
 
 if [ -z "$func" ]; then
-    local_ipv4=$(get_public_ip 4)
-    local_ipv6=$(get_public_ip 6)
+    ip_fetch_trace=/dev/null
+    if [ -n "$DEBUG" ]; then
+        ip_fetch_trace=$(mktemp)
+    fi
+    local_ipv4=$(get_public_ip 4 2>>"$ip_fetch_trace")
+    local_ipv6=$(get_public_ip 6 2>>"$ip_fetch_trace")
     # bgptools_v4=$(curl $curlArgs -s -4 --max-time 10 --user-agent "${UA_Browser}" "https://v4.bgp.tools/whoami-not-for-robots" &)
     # bgptools_v6=$(curl $curlArgs -s -6 --max-time 10 --user-agent "${UA_Browser}" "https://v6.bgp.tools/whoami-not-for-robots" &)
     ripe_stat_v4=$(curl $curlArgs -s --max-time 10 "https://stat.ripe.net/data/prefix-overview/data.json?resource=$local_ipv4" &)
@@ -511,7 +530,7 @@ function MediaUnlockTest_Netflix() {
     fi
     local result1=$( echo "$tmpresult1" | grep "og:video" )
     local result2=$( echo "$tmpresult2" | grep "og:video" )
-    local region1=$( echo -e $(echo "$tmpresult1" | grep 'netflix.reactContext' | awk -F= '{print $2}' | awk -F\; '{print $1}') | tr -d '[:cntrl:]' | sed 's/\^[^$]*\$//g' | json_query '.models.geo.data.requestCountry.id' | tr -d '"' )
+    local region1=$( echo -e $(echo "$tmpresult1" | grep 'netflix.reactContext' | awk -F= '{print $2}' | awk -F\; '{print $1}') | tr -d '\000-\037\177' | sed 's/\^[^$]*\$//g' | json_query '.models.geo.data.requestCountry.id' | tr -d '"' )
 
     if [ -n "$result1" ] || [ -n "$result2" ]; then
         echo -n -e "\r Netflix:\t\t\t\t${Font_Green}Yes (Region: ${region1})${Font_Suffix}\n"
@@ -1082,7 +1101,7 @@ function MediaUnlockTest_Viu.com() {
             echo -n -e "\r Viu.com:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
             return
         else
-            result=$(echo $result | tr [:lower:] [:upper:])
+            result=$(echo $result | tr 'a-z' 'A-Z')
             if [[ "$banresult" == *"block access"* ]]; then
                 echo -n -e "\r Viu.com:\t\t\t\t${Font_Red}No  (Region: ${result})${Font_Suffix}\n"
                 return
@@ -1273,7 +1292,7 @@ function MediaUnlockTest_YouTube_Premium() {
 # Print the city for an IATA airport code using the IATACode reference list.
 # Only an exact code match counts; prints nothing when the code is unknown.
 iata_location() {
-    echo "${IATACode}" | awk -F'|' -v code="$(echo "$1" | tr '[:lower:]' '[:upper:]')" '
+    echo "${IATACode}" | awk -F'|' -v code="$(echo "$1" | tr 'a-z' 'A-Z')" '
         { gsub(/[ \t\r]/, "", $3) }
         code != "" && $3 == code { sub(/^[ \t]+/, "", $1); sub(/[ \t]+$/, "", $1); print $1; exit }'
 }
@@ -1288,7 +1307,7 @@ function MediaUnlockTest_YouTube_CDN() {
 
     local cdn_node=$(echo $tmpresult | awk '{print $3}')
     if [[ "$cdn_node" == *"-"* ]]; then
-        local CDN_ISP=$(echo $cdn_node | cut -f1 -d"-" | tr [:lower:] [:upper:])
+        local CDN_ISP=$(echo $cdn_node | cut -f1 -d"-" | tr 'a-z' 'A-Z')
         local CDN_LOC=$(echo $cdn_node | cut -f2 -d"-" | sed 's/[^a-z]//g')
         local location=$(iata_location "$CDN_LOC")
         if [ -n "$location" ]; then
@@ -1477,7 +1496,7 @@ function MediaUnlockTest_HotStar() {
             echo -n -e "\r HotStar:\t\t\t\t${Font_Red}No${region_note}${Font_Suffix}\n"
             return
         fi
-        local site_region=$(curl $curlArgs -${1} -s -o /dev/null -L --max-time 10 -w '%{url_effective}\n' "https://www.hotstar.com" | sed 's@.*com/@@' | tr [:lower:] [:upper:])
+        local site_region=$(curl $curlArgs -${1} -s -o /dev/null -L --max-time 10 -w '%{url_effective}\n' "https://www.hotstar.com" | sed 's@.*com/@@' | tr 'a-z' 'A-Z')
         if [ -n "$region" ] && [ "$region" = "$site_region" ]; then
             echo -n -e "\r HotStar:\t\t\t\t${Font_Green}Yes${region_note}${Font_Suffix}\n"
         else
@@ -2287,7 +2306,7 @@ function MediaUnlockTest_DirecTVGO() {
         return
     fi
     local isForbidden=$(echo $tmpresult | grep 'proximamente')
-    local region=$(echo $tmpresult | cut -f4 -d"/" | tr [:lower:] [:upper:])
+    local region=$(echo $tmpresult | cut -f4 -d"/" | tr 'a-z' 'A-Z')
     if [ -n "$isForbidden" ]; then
         echo -n -e "\r DirecTV Go:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
         return
@@ -3283,7 +3302,7 @@ function MediaUnlockTest_SkyShowTime(){
     if [[ "$result1" == *"where-can-i-stream"* ]]; then
     	echo -n -e "\r SkyShowTime:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
     else
-    	local region1=$(echo -n "$result1" | sed 's#https://www.skyshowtime.com/\([0-9a-zA-Z][0-9a-zA-Z]\)?\r#\1#i' | tr [:lower:] [:upper:] )
+    	local region1=$(echo -n "$result1" | sed 's#https://www.skyshowtime.com/\([0-9a-zA-Z][0-9a-zA-Z]\)?\r#\1#i' | tr 'a-z' 'A-Z' )
         echo -n -e "\r SkyShowTime:\t\t\t\t${Font_Green}Yes (Region: ${region1})${Font_Suffix}\n"
     fi
 }
@@ -4298,7 +4317,7 @@ function MediaUnlockTest_Apple() {
         print_network_failure "Apple:\t\t\t\t\t" "$1" "gspe1-ssl.ls.apple.com"
         return
     fi
-    region=$(echo "$region" | tr -d '[:space:]')
+    region=$(echo "$region" | tr -d ' \t\n\r\v\f')
     if ! [[ "$region" =~ ^[A-Za-z]{2}$ ]]; then
         echo -n -e "\r Apple:\t\t\t\t\t${Font_Red}Failed (Unexpected Result)${Font_Suffix}\n"
         return
@@ -4826,6 +4845,11 @@ function AI_UnlockTest() {
 }
 
 function CheckV4() {
+    if [ -f "$ip_fetch_trace" ]; then
+        cat "$ip_fetch_trace"
+        rm -f "$ip_fetch_trace"
+        echo ""
+    fi
     if [[ "$language" == "e" ]]; then
         if [[ "$NetworkType" == "6" ]]; then
             isv4=0
