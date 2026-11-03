@@ -3607,6 +3607,31 @@ function MediaUnlockTest_Google() {
     echo -n -e "\r Google Location:\t\t\t${Font_Green}${region:4:-6}${Font_Suffix}\n"
 }
 
+function WebTest_GoogleSearchCAPTCHA() {
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 'https://www.google.com/search?q=curl&oq=curl&sourceid=chrome&ie=UTF-8' \
+        -H 'accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' -H 'accept-language: en-US,en;q=0.9' \
+        -H 'sec-ch-ua-mobile: ?0' -H 'sec-ch-ua-platform: "Windows"' -H 'sec-fetch-dest: document' -H 'sec-fetch-mode: navigate' \
+        -H 'sec-fetch-site: none' -H 'sec-fetch-user: ?1' -H 'upgrade-insecure-requests: 1' 2>&1)
+    if [[ "$tmpresult" == "curl"* ]] || [ -z "$tmpresult" ]; then
+        print_network_failure "Google Search CAPTCHA Free:\t\t" "$1" "www.google.com"
+        return
+    fi
+
+    local isBlocked=$(echo "$tmpresult" | grep -iE 'unusual traffic from|is blocked|unaddressed abuse')
+    local isOK=$(echo "$tmpresult" | grep -i 'curl')
+
+    if [ -n "$isBlocked" ]; then
+        echo -n -e "\r Google Search CAPTCHA Free:\t\t${Font_Red}No${Font_Suffix}\n"
+        return
+    fi
+    if [ -n "$isOK" ]; then
+        echo -n -e "\r Google Search CAPTCHA Free:\t\t${Font_Green}Yes${Font_Suffix}\n"
+        return
+    fi
+
+    echo -n -e "\r Google Search CAPTCHA Free:\t\t${Font_Red}Failed (Error: PAGE ERROR)${Font_Suffix}\n"
+}
+
 function MediaUnlockTest_GooglePlayStore() {
     local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 -w '\n%{http_code}' "https://play.google.com/store/games" \
         -H 'accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7' \
@@ -4672,14 +4697,14 @@ function Global_UnlockTest() {
     # MediaUnlockTest_Instagram.Music ${1}
     run_check GameTest_Steam ${1} &
     run_check MediaUnlockTest_Google ${1} &
+	run_check WebTest_GoogleSearchCAPTCHA ${1} &
     run_check MediaUnlockTest_GooglePlayStore ${1} &
     run_check MediaUnlockTest_GoogleGemini ${1} &
     run_check MediaUnlockTest_Tiktok ${1} &
     run_check MediaUnlockTest_BilibiliAnimeNew ${1} &
     )
     wait
-    local array=("Dazn:" "HotStar:" "Disney+:" "Netflix:" "YouTube Premium:" "Amazon Prime Video:" "TVBAnywhere+:" "iQyi Oversea:" "Bilibili Anime:" "Viu.com:" "Tiktok" "YouTube CDN:" "Google Location:" "Google Play Store:" "Google Gemini:" "YouTube Region:" "Netflix Preferred CDN:" "Wikipedia" "Bing:" "Microsoft Location:" "Reddit:" "X (formerly Twitter):" "Apple:" "Facebook:" "Spotify" "Steam Currency:" "Instagram")
-    echo_Result ${result} ${array}
+    local array=("Dazn:" "HotStar:" "Disney+:" "Netflix:" "YouTube Premium:" "Amazon Prime Video:" "TVBAnywhere+:" "iQyi Oversea:" "Bilibili Anime:" "Viu.com:" "Tiktok" "YouTube CDN:" "Google Location:" "Google Search CAPTCHA Free:" "Google Play Store:" "Google Gemini:" "YouTube Region:" "Netflix Preferred CDN:" "Wikipedia" "Bing:" "Microsoft Location:" "Reddit:" "X (formerly Twitter):" "Apple:" "Facebook:" "Spotify" "Steam Currency:" "Instagram")
     echo "======================================="
 }
 
