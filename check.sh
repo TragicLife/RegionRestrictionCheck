@@ -4189,22 +4189,40 @@ function MediaUnlockTest_BingSearch() {
         region=$(echo "$tmpresult" | grep -Eo 'Region:"[^"]*"' | head -n1 | cut -d'"' -f2)
     fi
     if [[ "$region" == "CN" || -z "$region" ]] && [[ "$tmpresult" == *"cn.bing.com"* ]]; then
-        echo -n -e "\r BingSearch:\t\t\t\t${Font_Yellow}Only cn.bing.com (Region: CN)${risky}${Font_Suffix}\n"
+        echo -n -e "\r Bing:\t\t\t\t${Font_Yellow}Only cn.bing.com (Region: CN)${risky}${Font_Suffix}\n"
         return
     fi
     if [ -n "$region" ]; then
         if [ -n "$risky" ]; then
-            echo -n -e "\r BingSearch:\t\t\t\t${Font_Yellow}Yes (Region: ${region^^})${risky}${Font_Suffix}\n"
+            echo -n -e "\r Bing:\t\t\t\t${Font_Yellow}Yes (Region: ${region^^})${risky}${Font_Suffix}\n"
         else
-            echo -n -e "\r BingSearch:\t\t\t\t${Font_Green}Yes (Region: ${region^^})${Font_Suffix}\n"
+            echo -n -e "\r Bing:\t\t\t\t${Font_Green}Yes (Region: ${region^^})${Font_Suffix}\n"
         fi
         return
     fi
     if [[ "$httpcode" == "403" ]] || [[ "$httpcode" == "451" ]]; then
-        echo -n -e "\r BingSearch:\t\t\t\t${Font_Red}No  (Banned)${risky}${Font_Suffix}\n"
+        echo -n -e "\r Bing:\t\t\t\t${Font_Red}No  (Banned)${risky}${Font_Suffix}\n"
         return
     fi
-    echo -n -e "\r BingSearch:\t\t\t\t${Font_Red}Failed (Unexpected Result: ${httpcode})${Font_Suffix}\n"
+    echo -n -e "\r Bing:\t\t\t\t${Font_Red}Failed (Unexpected Result: ${httpcode})${Font_Suffix}\n"
+}
+
+function MediaUnlockTest_Microsoft() {
+    # Searching "weather" makes Bing render the detected location under the search bar.
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL -b "" --max-time 10 -H 'accept-language: en-US,en;q=0.9' "https://www.bing.com/search?q=weather" 2>&1)
+    if [[ "$tmpresult" == "curl"* ]]; then
+        print_network_failure "Microsoft:\t\t\t\t" "$1" "www.bing.com"
+        return
+    fi
+    local location=$(echo "$tmpresult" | grep -o 'id="g_EfLoc"[^>]*data-disp="[^"]*"' | head -n1 | sed 's/.*data-disp="//; s/"$//')
+    if [ -z "$location" ]; then
+        location=$(echo "$tmpresult" | awk -F'class="locTw"' 'NF>1{print $2; exit}' | grep -o '</acf-icon><span[^>]*>[^<]*' | head -n1 | sed 's/.*>//')
+    fi
+    if [ -z "$location" ]; then
+        echo -n -e "\r Microsoft:\t\t\t\t${Font_Red}Failed (Unknown Location)${Font_Suffix}\n"
+        return
+    fi
+    echo -n -e "\r Microsoft:\t\t\t\t${Font_Green}${location}${Font_Suffix}\n"
 }
 
 function MediaUnlockTest_Reddit() {
@@ -4607,6 +4625,7 @@ function Global_UnlockTest() {
         run_check MediaUnlockTest_NetflixCDN ${1} &
         run_check MediaUnlockTest_Wikipedia_Editable ${1} &
         run_check MediaUnlockTest_BingSearch ${1} &
+        run_check MediaUnlockTest_Microsoft ${1} &
         run_check MediaUnlockTest_Reddit ${1} &
         run_check MediaUnlockTest_X ${1} &
         run_check MediaUnlockTest_Apple ${1} &
@@ -4635,6 +4654,7 @@ function Global_UnlockTest() {
         run_check MediaUnlockTest_NetflixCDN ${1} &
         # MediaUnlockTest_Wikipedia_Editable ${1} &
         run_check MediaUnlockTest_BingSearch ${1} &
+        run_check MediaUnlockTest_Microsoft ${1} &
         run_check MediaUnlockTest_Reddit ${1} &
         run_check MediaUnlockTest_X ${1} &
         run_check MediaUnlockTest_Apple ${1} &
@@ -4649,7 +4669,7 @@ function Global_UnlockTest() {
         )
     fi
     wait
-    local array=("Dazn:" "HotStar:" "Disney+:" "Netflix:" "YouTube Premium:" "Amazon Prime Video:" "TVBAnywhere+:" "iQyi Oversea:" "Bilibili Anime:" "Viu.com:" "Tiktok" "YouTube CDN:" "Google Location:" "Google Play Store:" "Google Gemini:" "YouTube Region:" "Netflix Preferred CDN:" "Wikipedia" "BingSearch:" "Reddit:" "X (formerly Twitter):" "Apple:" "Facebook:" "Spotify" "Steam Currency:" "Instagram")
+    local array=("Dazn:" "HotStar:" "Disney+:" "Netflix:" "YouTube Premium:" "Amazon Prime Video:" "TVBAnywhere+:" "iQyi Oversea:" "Bilibili Anime:" "Viu.com:" "Tiktok" "YouTube CDN:" "Google Location:" "Google Play Store:" "Google Gemini:" "YouTube Region:" "Netflix Preferred CDN:" "Wikipedia" "Bing:" "Microsoft:" "Reddit:" "X (formerly Twitter):" "Apple:" "Facebook:" "Spotify" "Steam Currency:" "Instagram")
     echo_Result ${result} ${array}
     echo "======================================="
 }
