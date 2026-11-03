@@ -3697,9 +3697,9 @@ function MediaUnlockTest_Tiktok() {
     page="${page%$'\n'*}"
     # Do not follow redirects: in blocked regions store_region 302s to /<region>/about,
     # and re-POSTing there returns 405. The region is then taken from the redirect URL.
-    local result1=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} -sS --max-time 10 -X POST -w '@@REDIRECT@@%{redirect_url}' "https://www.tiktok.com/passport/web/store_region/" 2>&1)
-    local redirect="${result1##*@@REDIRECT@@}"
-    result1="${result1%@@REDIRECT@@*}"
+    local result1=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} -sS --max-time 10 -X POST -w '##REDIRECT##%{redirect_url}' "https://www.tiktok.com/passport/web/store_region/" 2>&1)
+    local redirect="${result1##*##REDIRECT##}"
+    result1="${result1%##REDIRECT##*}"
     local region=""
     if [[ -z "$redirect" ]]; then
         region="$(echo "${result1}" | json_query ".data.store_region" | tr -d '"')"
