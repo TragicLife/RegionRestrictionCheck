@@ -282,22 +282,25 @@ run_check() {
     fi
     rm -f "$CF_WAF_MARK"
 }
-# Print the public IPv4/IPv6 address. Cloudflare's trace is tried first; when it is
-# unreachable (blocked, filtered, slow), backup services are used before concluding
-# that the IP version has no connectivity.
+# Print the public IPv4/IPv6 address. The services used serve only one IP version,
+# so the result stays correct where curl -4/-6 cannot pick the egress IP version
+# (VPN TUN mode, fake-IP DNS, proxies). The next service is tried when one is
+# unreachable before concluding that the IP version has no connectivity.
 # $1: 4 or 6
 get_public_ip() {
-    local ip url
-    ip=$(curl $curlArgs -${1} -s --max-time 10 "https://www.cloudflare.com/cdn-cgi/trace" 2>/dev/null | grep '^ip=' | cut -d= -f2)
-    for url in "https://api64.ipify.org" "https://api.ip.sb/ip" "https://icanhazip.com"; do
-        if [[ "$1" == "4" && "$ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || [[ "$1" == "6" && "$ip" == *:* ]]; then
-            break
-        fi
-        ip=$(curl $curlArgs -${1} -s --max-time 5 --user-agent "${UA_Browser}" "$url" 2>/dev/null | tr -d '[:space:]')
-    done
-    if [[ "$1" == "4" && "$ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || [[ "$1" == "6" && "$ip" =~ ^[0-9A-Fa-f:]+$ && "$ip" == *:* ]]; then
-        echo "$ip"
+    local ip url urls
+    if [[ "$1" == "4" ]]; then
+        urls=("https://api4.ipify.org" "https://ipv4.icanhazip.com")
+    else
+        urls=("https://api6.ipify.org" "https://ipv6.icanhazip.com")
     fi
+    for url in "${urls[@]}"; do
+        ip=$(curl $curlArgs -${1} -s --max-time 5 --user-agent "${UA_Browser}" "$url" 2>/dev/null | tr -d '[:space:]')
+        if [[ "$1" == "4" && "$ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || [[ "$1" == "6" && "$ip" =~ ^[0-9A-Fa-f:]+$ && "$ip" == *:* ]]; then
+            echo "$ip"
+            return
+        fi
+    done
 }
 
 if [ -z "$func" ]; then
