@@ -1124,32 +1124,45 @@ function MediaUnlockTest_Niconico() {
         return
     fi
     local httpcode=${tmpresult##*$'\n'}
-    # The watch page embeds its state as JSON with escaped unicode, so "同じ地域" may appear as \u540c\u3058\u5730\u57df.
-    if [[ "$tmpresult" == *"同じ地域"* ]] || [[ "$tmpresult" == *'\u540c\u3058\u5730\u57df'* ]] || [[ "$httpcode" == "400" ]] || [[ "$httpcode" == "403" ]] || [[ "$httpcode" == "451" ]]; then
-        echo -n -e "\r Niconico:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
-        return
-    fi
-    if [[ "$httpcode" != "200" ]]; then
+    if [[ "$httpcode" != "200" ]] && [[ "$httpcode" != "400" ]] && [[ "$httpcode" != "403" ]] && [[ "$httpcode" != "451" ]]; then
         echo -n -e "\r Niconico:\t\t\t\t${Font_Red}Failed (Unexpected Result: ${httpcode})${Font_Suffix}\n"
         return
     fi
+    local blocked=0
+    # Outside Japan the watch page still returns 200 but embeds "reasonCode":"DOMESTIC_VIDEO" in its state.
+    # Older pages show "同じ地域" text, possibly as escaped unicode \u540c\u3058\u5730\u57df.
+    if [[ "$tmpresult" == *'DOMESTIC_VIDEO'* ]] || [[ "$tmpresult" == *"同じ地域"* ]] || [[ "$tmpresult" == *'\u540c\u3058\u5730\u57df'* ]] || [[ "$httpcode" != "200" ]]; then
+        blocked=1
+    fi
     local responsetype=$(echo "$tmpresult" | grep -Eo 'responseType&quot;:&quot;[A-Za-z_]+' | head -n1 | sed 's/.*&quot;//')
-    if [ -n "$responsetype" ] && [[ "$responsetype" != "normal" ]]; then
+    if [ "$blocked" == "0" ] && [ -n "$responsetype" ] && [[ "$responsetype" != "normal" ]]; then
         echo -n -e "\r Niconico:\t\t\t\t${Font_Red}No  (${responsetype})${Font_Suffix}\n"
         return
     fi
 
-    # The viewer country as Niconico sees it is only exposed on live program pages (userProgramWatch.country).
-    local liveid=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 "https://live.nicovideo.jp/" 2>/dev/null | grep -Eo 'nicoliveProgramId&quot;:&quot;lv[0-9]+' | head -n1 | grep -Eo 'lv[0-9]+')
+    # Most live programs are open overseas, but official anime screenings (上映会) are Japan-only.
+    # Their page state exposes userProgramWatch.isCountryRestrictionTarget and the viewer country as Niconico sees it.
+    local liveid=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 "https://live.nicovideo.jp/search?keyword=%E4%B8%8A%E6%98%A0%E4%BC%9A&providerTypes=official" 2>/dev/null | grep -Eo 'class="program-card" id="lv[0-9]+' | head -n1 | grep -Eo 'lv[0-9]+')
+    if [ -z "$liveid" ]; then
+        liveid=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 "https://live.nicovideo.jp/" 2>/dev/null | grep -Eo 'nicoliveProgramId&quot;:&quot;lv[0-9]+' | head -n1 | grep -Eo 'lv[0-9]+')
+    fi
     local region=""
     if [ -n "$liveid" ]; then
-        region=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 "https://live.nicovideo.jp/watch/${liveid}" 2>/dev/null | sed 's/&quot;/"/g' | grep -F '"userProgramWatch":{' | head -n1 | sed 's/.*"userProgramWatch":{//' | cut -c1-400 | grep -Eo '"country":"[A-Za-z]+"' | head -n1 | cut -d'"' -f4)
+        local watchstate=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 "https://live.nicovideo.jp/watch/${liveid}" 2>/dev/null | sed 's/&quot;/"/g' | grep -F '"userProgramWatch":{' | head -n1 | sed 's/.*"userProgramWatch":{//' | cut -c1-400)
+        region=$(echo "$watchstate" | grep -Eo '"country":"[A-Za-z]+"' | head -n1 | cut -d'"' -f4)
+        if [[ "$watchstate" == *'"isCountryRestrictionTarget":true'* ]]; then
+            blocked=1
+        fi
     fi
+    local regiontext=""
     if [ -n "$region" ]; then
-        echo -n -e "\r Niconico:\t\t\t\t${Font_Green}Yes (Region: ${region^^})${Font_Suffix}\n"
+        regiontext=" (Region: ${region^^})"
+    fi
+    if [ "$blocked" == "1" ]; then
+        echo -n -e "\r Niconico:\t\t\t\t${Font_Red}No${regiontext}${Font_Suffix}\n"
         return
     fi
-    echo -n -e "\r Niconico:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
+    echo -n -e "\r Niconico:\t\t\t\t${Font_Green}Yes${regiontext}${Font_Suffix}\n"
 }
 
 function MediaUnlockTest_MGStage() {
