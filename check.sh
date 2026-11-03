@@ -283,9 +283,10 @@ run_check() {
     rm -f "$CF_WAF_MARK"
 }
 # Print the public IPv4/IPv6 address. The services used serve only one IP version,
-# so the result stays correct where curl -4/-6 cannot pick the egress IP version
-# (VPN TUN mode, fake-IP DNS, proxies). The next service is tried when one is
-# unreachable before concluding that the IP version has no connectivity.
+# so curl is not forced with -4/-6: behind a VPN (TUN mode, fake-IP DNS) or a proxy
+# the local connection can fail for a version the egress still has, or succeed
+# through the other one. The next service is tried when one is unreachable before
+# concluding that the IP version has no connectivity.
 # $1: 4 or 6
 get_public_ip() {
     local ip url urls
@@ -295,7 +296,7 @@ get_public_ip() {
         urls=("https://api6.ipify.org" "https://ipv6.icanhazip.com")
     fi
     for url in "${urls[@]}"; do
-        ip=$(curl $curlArgs -${1} -s --max-time 5 --user-agent "${UA_Browser}" "$url" 2>/dev/null | tr -d '[:space:]')
+        ip=$(curl $curlArgs -s --max-time 5 --user-agent "${UA_Browser}" "$url" 2>/dev/null | tr -d '[:space:]')
         if [[ "$1" == "4" && "$ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || [[ "$1" == "6" && "$ip" =~ ^[0-9A-Fa-f:]+$ && "$ip" == *:* ]]; then
             echo "$ip"
             return
@@ -4492,7 +4493,6 @@ function EU_UnlockTest() {
 
 function HK_UnlockTest() {
     echo "=============[ Hong Kong ]============="
-       if [[ "$1" == 4 ]] || [[ "$Stype" == "force6" ]];then
 	local result=$(
 	    run_check MediaUnlockTest_NowE ${1} &
 	    run_check MediaUnlockTest_ViuTV ${1} &
@@ -4504,17 +4504,6 @@ function HK_UnlockTest() {
         run_check MediaUnlockTest_NBATV ${1} &
 	    # MediaUnlockTest_BilibiliHKMCTW ${1} &
 	)
-    else
-	local result=$(
-	    # MediaUnlockTest_NowE ${1} &
-	    # MediaUnlockTest_ViuTV ${1} &
-	    # MediaUnlockTest_MyTVSuper ${1} &
-	    # MediaUnlockTest_HBOGO_ASIA ${1} &
-        run_check MediaUnlockTest_HoyTV ${1} &
-        run_check MediaUnlockTest_HBOMax ${1} &
-	    # MediaUnlockTest_BilibiliHKMCTW ${1} &
-	)
-    fi
     wait
     local array=("Now E:" "Viu.TV:" "MyTVSuper:" "HBO Max:" "HOY TV" "BiliBili Hongkong/Macau/Taiwan:" "Bahamut Anime:" "NBA TV:")
     echo_Result ${result} ${array}
@@ -4610,64 +4599,34 @@ function JP_UnlockTest() {
 function Global_UnlockTest() {
     echo ""
     echo "============[ Multination ]============"
-    if [[ "$1" == 4 ]] || [[ "$Stype" == "force6" ]];then
-        local result=$(
-        run_check MediaUnlockTest_Dazn ${1} &
-        run_check MediaUnlockTest_HotStar ${1} &
-        run_check MediaUnlockTest_DisneyPlus ${1} &
-        run_check MediaUnlockTest_Netflix ${1} &
-        run_check MediaUnlockTest_YouTube_Premium ${1} &
-        run_check MediaUnlockTest_PrimeVideo_Region ${1} &
-        run_check MediaUnlockTest_TVBAnywhere ${1} &
-        run_check MediaUnlockTest_iQYI_Region ${1} &
-        run_check MediaUnlockTest_Viu.com ${1} &
-        run_check MediaUnlockTest_YouTube_CDN ${1} &
-        run_check MediaUnlockTest_NetflixCDN ${1} &
-        run_check MediaUnlockTest_Wikipedia_Editable ${1} &
-        run_check MediaUnlockTest_BingSearch ${1} &
-        run_check MediaUnlockTest_Microsoft ${1} &
-        run_check MediaUnlockTest_Reddit ${1} &
-        run_check MediaUnlockTest_X ${1} &
-        run_check MediaUnlockTest_Apple ${1} &
-        run_check MediaUnlockTest_Facebook ${1} &
-        run_check MediaUnlockTest_Spotify ${1} &
-        # MediaUnlockTest_Instagram.Music ${1}
-        run_check GameTest_Steam ${1} &
-        run_check MediaUnlockTest_Google ${1} &
-        run_check MediaUnlockTest_GooglePlayStore ${1} &
-        run_check MediaUnlockTest_GoogleGemini ${1} &
-        run_check MediaUnlockTest_Tiktok ${1} &
-        run_check MediaUnlockTest_BilibiliAnimeNew ${1} &
-        )
-    else
-        local result=$(
-        # MediaUnlockTest_Dazn ${1} &
-        run_check MediaUnlockTest_HotStar ${1} &
-        run_check MediaUnlockTest_DisneyPlus ${1} &
-        run_check MediaUnlockTest_Netflix ${1} &
-        run_check MediaUnlockTest_YouTube_Premium ${1} &
-        # MediaUnlockTest_PrimeVideo_Region ${1} &
-        # MediaUnlockTest_TVBAnywhere ${1} &
-        # MediaUnlockTest_iQYI_Region ${1} &
-        # MediaUnlockTest_Viu.com ${1} &
-        run_check MediaUnlockTest_YouTube_CDN ${1} &
-        run_check MediaUnlockTest_NetflixCDN ${1} &
-        # MediaUnlockTest_Wikipedia_Editable ${1} &
-        run_check MediaUnlockTest_BingSearch ${1} &
-        run_check MediaUnlockTest_Microsoft ${1} &
-        run_check MediaUnlockTest_Reddit ${1} &
-        run_check MediaUnlockTest_X ${1} &
-        run_check MediaUnlockTest_Apple ${1} &
-        run_check MediaUnlockTest_Facebook ${1} &
-        run_check MediaUnlockTest_Spotify ${1} &
-        # MediaUnlockTest_Instagram.Music ${1}
-        # GameTes t_Steam ${1} &
-        run_check MediaUnlockTest_Google ${1} &
-        run_check MediaUnlockTest_GooglePlayStore ${1} &
-        run_check MediaUnlockTest_GoogleGemini ${1} &
-        run_check MediaUnlockTest_BilibiliAnimeNew ${1} &
-        )
-    fi
+    local result=$(
+    run_check MediaUnlockTest_Dazn ${1} &
+    run_check MediaUnlockTest_HotStar ${1} &
+    run_check MediaUnlockTest_DisneyPlus ${1} &
+    run_check MediaUnlockTest_Netflix ${1} &
+    run_check MediaUnlockTest_YouTube_Premium ${1} &
+    run_check MediaUnlockTest_PrimeVideo_Region ${1} &
+    run_check MediaUnlockTest_TVBAnywhere ${1} &
+    run_check MediaUnlockTest_iQYI_Region ${1} &
+    run_check MediaUnlockTest_Viu.com ${1} &
+    run_check MediaUnlockTest_YouTube_CDN ${1} &
+    run_check MediaUnlockTest_NetflixCDN ${1} &
+    run_check MediaUnlockTest_Wikipedia_Editable ${1} &
+    run_check MediaUnlockTest_BingSearch ${1} &
+    run_check MediaUnlockTest_Microsoft ${1} &
+    run_check MediaUnlockTest_Reddit ${1} &
+    run_check MediaUnlockTest_X ${1} &
+    run_check MediaUnlockTest_Apple ${1} &
+    run_check MediaUnlockTest_Facebook ${1} &
+    run_check MediaUnlockTest_Spotify ${1} &
+    # MediaUnlockTest_Instagram.Music ${1}
+    run_check GameTest_Steam ${1} &
+    run_check MediaUnlockTest_Google ${1} &
+    run_check MediaUnlockTest_GooglePlayStore ${1} &
+    run_check MediaUnlockTest_GoogleGemini ${1} &
+    run_check MediaUnlockTest_Tiktok ${1} &
+    run_check MediaUnlockTest_BilibiliAnimeNew ${1} &
+    )
     wait
     local array=("Dazn:" "HotStar:" "Disney+:" "Netflix:" "YouTube Premium:" "Amazon Prime Video:" "TVBAnywhere+:" "iQyi Oversea:" "Bilibili Anime:" "Viu.com:" "Tiktok" "YouTube CDN:" "Google Location:" "Google Play Store:" "Google Gemini:" "YouTube Region:" "Netflix Preferred CDN:" "Wikipedia" "Bing:" "Microsoft Location:" "Reddit:" "X (formerly Twitter):" "Apple:" "Facebook:" "Spotify" "Steam Currency:" "Instagram")
     echo_Result ${result} ${array}
