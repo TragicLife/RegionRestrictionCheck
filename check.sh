@@ -3962,12 +3962,12 @@ function MediaUnlockTest_beIN_Sports() {
 }
 
 function MediaUnlockTest_Wikipedia_Editable(){
-    local tmpresult=$(curl $curlArgs -${1} -s 'https://en.wikipedia.org/w/index.php?title=Wikipedia:WikiProject_on_open_proxies&action=edit' --user-agent "${UA_Browser}")
+    local tmpresult=$(curl $curlArgs -${1} -s 'https://zh.wikipedia.org/w/index.php?title=Wikipedia%3A%E6%B2%99%E7%9B%92&action=edit' --user-agent "${UA_Browser}")
     if [ -z "$tmpresult" ]; then
-        print_network_failure "Wikipedia Editability:\t\t\t" "$1" "en.wikipedia.org"
+        print_network_failure "Wikipedia Editability:\t\t\t" "$1" "zh.wikipedia.org"
         return
     fi
-    local result=$(echo "$tmpresult" | grep -i 'This IP address has been')
+    local result=$(echo "$tmpresult" | grep -i 'Banned')
     if [ -z "$result" ]; then
         echo -n -e "\r Wikipedia Editability:\t\t\t${Font_Green}Yes${Font_Suffix}\n"
         return
