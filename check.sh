@@ -370,9 +370,9 @@ function MediaUnlockTest_PCRJP() {
 }
 
 function MediaUnlockTest_UMAJP() {
-    local result=$(curl $curlArgs --user-agent "${UA_Dalvik}" -${1} -fsL --write-out %{http_code} --output /dev/null --max-time 10 "https://api-umamusume.cygames.jp/" 2>&1)
+    local result=$(curl $curlArgs --user-agent "${UA_Dalvik}" -${1} -fsL --write-out %{http_code} --output /dev/null --max-time 10 "https://api.games.umamusume.jp/" 2>&1)
     if [ "$result" = "000" ]; then
-        print_network_failure "Pretty Derby Japan:\t\t\t" "$1" "api-umamusume.cygames.jp"
+        print_network_failure "Pretty Derby Japan:\t\t\t" "$1" "api.games.umamusume.jp"
     elif [ "$result" = "404" ]; then
         echo -n -e "\r Pretty Derby Japan:\t\t\t${Font_Green}Yes${Font_Suffix}\n"
     elif [ "$result" = "403" ]; then
@@ -499,7 +499,7 @@ function MediaUnlockTest_DisneyPlus() {
 }
 
 function MediaUnlockTest_Dazn() {
-    local tmpresult=$(curl $curlArgs -${1} -sS --max-time 10 -X POST -H "Content-Type: application/json" -d '{"LandingPageKey":"generic","Languages":"zh-CN,zh,en","Platform":"web","PlatformAttributes":{},"Manufacturer":"","PromoCode":"","Version":"2"}' "https://startup.core.indazn.com/misl/v5/Startup" 2>&1)
+    local tmpresult=$(curl $curlArgs -${1} -sS --max-time 10 -X POST -H "Content-Type: application/json" -d '{"LandingPageKey":"generic","Languages":"en","Platform":"web","PlatformAttributes":{},"Manufacturer":"","PromoCode":"","Version":"2"}' "https://startup.core.indazn.com/misl/v5/Startup" 2>&1)
     if [[ "$tmpresult" == "curl"* ]]; then
         print_network_failure "Dazn:\t\t\t\t\t" "$1" "startup.core.indazn.com"
         return
@@ -508,8 +508,13 @@ function MediaUnlockTest_Dazn() {
         echo -n -e "\r Dazn:\t\t\t\t\t${Font_Red}No  (Banned)${Font_Suffix}\n"
         return
     fi
-    if [[ "$tmpresult" == *"Forbidden"* ]]; then
+    if [[ "$tmpresult" == *"Forbidden"* ]] || [[ "$tmpresult" == *"Request blocked."* ]]; then
         echo -n -e "\r Dazn:\t\t\t\t\t${Font_Red}No  (Banned)${Font_Suffix}\n"
+        return
+    fi
+    # Anything else that isn't JSON (CloudFront/WAF error pages, etc.)
+    if [[ "$tmpresult" != "{"* ]]; then
+        echo -n -e "\r Dazn:\t\t\t\t\t${Font_Red}Failed (Unexpected Result)${Font_Suffix}\n"
         return
     fi
     local isAllowed=$(echo $tmpresult | json_query .Region.isAllowed)
@@ -632,24 +637,6 @@ function MediaUnlockTest_unext() {
         return
     fi
 
-}
-
-function MediaUnlockTest_Paravi() {
-    local tmpresult=$(curl $curlArgs -${1} -Ss --max-time 10 -H "Content-Type: application/json" -d '{"meta_id":17414,"vuid":"3b64a775a4e38d90cc43ea4c7214702b","device_code":1,"app_id":1}' "https://api.paravi.jp/api/v1/playback/auth" 2>&1)
-
-    if [[ "$tmpresult" == "curl"* ]]; then
-        print_network_failure "Paravi:\t\t\t\t" "$1" "api.paravi.jp"
-        return
-    fi
-
-    local result=$(echo $tmpresult | json_query . | grep type | awk '{print $2}' | cut -f2 -d'"')
-    if [[ "$result" == "Forbidden" ]]; then
-        echo -n -e "\r Paravi:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
-        return
-    elif [[ "$result" == "Unauthorized" ]]; then
-        echo -n -e "\r Paravi:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
-        return
-    fi
 }
 
 function MediaUnlockTest_wowow() {
@@ -1227,7 +1214,7 @@ function MediaUnlockTest_PrimeVideo_Region() {
         return
     fi
 
-    local tmpresult1=$(curl $curlArgs -${1} --user-agent "PrimeVideo/10.68 (iPad; iOS 18.3.2; Scale/2.00)" -sSL --max-time 10 "https://ab9f7h23rcdn.eu.api.amazonvideo.com/cdp/appleedge/getDataByTransform/v1/apple/detail/vod/v1.kt?itemId=amzn1.dv.gti.e6b39984-2bb6-f7d0-33e4-08ec574947f0&deviceId=6F97F9CCFA2243F1A3C44BD3C7F7908E&deviceTypeId=A3JTVZS31ZJ340&density=2x&firmware=10.6800.16104.3&format=json&enabledFeatures=denarius.location.gen4.daric.siglos.siglosPartnerBilling.contentDescriptors.contentDescriptorsV2.productPlacement.zeno.seriesSearch.tapsV2.dateTimeLocalization.multiSourcedEvents.mseEventLevelOffers.liveWatchModal.lbv.daapi.maturityRatingDecoration.seasonTrailer.cleanSlate.xbdModalV2.xbdModalVdp.playbackPinV2.exploreTab.reactions.progBadging.atfEpTimeVis.prereleaseCx.vppaConsent.episodicRelease.movieVam.movieVamCatalog&journeyIngressContext=8%7CEgRzdm9k&osLocale=zh_Hans_CN&timeZoneId=Asia%2FShanghai&uxLocale=zh_CN" 2>&1)
+    local tmpresult1=$(curl $curlArgs -${1} --user-agent "PrimeVideo/10.68 (iPad; iOS 18.3.2; Scale/2.00)" -sSL --max-time 10 "https://ab9f7h23rcdn.eu.api.amazonvideo.com/cdp/appleedge/getDataByTransform/v1/apple/detail/vod/v1.kt?itemId=amzn1.dv.gti.e6b39984-2bb6-f7d0-33e4-08ec574947f0&deviceId=6F97F9CCFA2243F1A3C44BD3C7F7908E&deviceTypeId=A3JTVZS31ZJ340&density=2x&firmware=10.6800.16104.3&format=json&enabledFeatures=denarius.location.gen4.daric.siglos.siglosPartnerBilling.contentDescriptors.contentDescriptorsV2.productPlacement.zeno.seriesSearch.tapsV2.dateTimeLocalization.multiSourcedEvents.mseEventLevelOffers.liveWatchModal.lbv.daapi.maturityRatingDecoration.seasonTrailer.cleanSlate.xbdModalV2.xbdModalVdp.playbackPinV2.exploreTab.reactions.progBadging.atfEpTimeVis.prereleaseCx.vppaConsent.episodicRelease.movieVam.movieVamCatalog&journeyIngressContext=8%7CEgRzdm9k&osLocale=en_US&timeZoneId=Etc%2FUtc&uxLocale=en_US" 2>&1)
     if [[ "$tmpresult1" = "curl"* ]]; then
         print_network_failure "Amazon Prime Video:\t\t\t" "$1" "ab9f7h23rcdn.eu.api.amazonvideo.com"
         return
@@ -1912,19 +1899,6 @@ function MediaUnlockTest_ProjectSekai() {
         echo -n -e "\r Project Sekai: Colorful Stage:\t\t${Font_Red}No${Font_Suffix}\n"
     else
         echo -n -e "\r Project Sekai: Colorful Stage:\t\t${Font_Red}Failed (Unexpected Result: $result)${Font_Suffix}\n"
-    fi
-}
-
-function MediaUnlockTest_KonosubaFD() {
-    local result=$(curl $curlArgs -X POST --user-agent "User-Agent: pj0007/212 CFNetwork/1240.0.4 Darwin/20.6.0" -${1} -fsL --write-out %{http_code} --output /dev/null --max-time 10 "https://api.konosubafd.jp/api/masterlist" 2>&1)
-    if [ "$result" = "000" ]; then
-        print_network_failure "Konosuba Fantastic Days:\t\t" "$1" "api.konosubafd.jp"
-    elif [ "$result" = "200" ]; then
-        echo -n -e "\r Konosuba Fantastic Days:\t\t${Font_Green}Yes${Font_Suffix}\n"
-    elif [ "$result" = "403" ]; then
-        echo -n -e "\r Konosuba Fantastic Days:\t\t${Font_Red}No${Font_Suffix}\n"
-    else
-        echo -n -e "\r Konosuba Fantastic Days:\t\t${Font_Red}Failed (Unexpected Result: $result)${Font_Suffix}\n"
     fi
 }
 
@@ -2624,7 +2598,7 @@ function MediaUnlockTest_VideoMarket() {
         return
     fi
     local Token=$(echo $TokenSrc| grep -Eo 'notLoggedInTokenPc:(.|)*notLoggedInTokenSpAndroid')
-    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 "https://www.videomarket.jp/graphql" -X POST -d '{"operationName":"readStatus","variables":{},"query":"query readStatus {\n  readStatus {\n    isRead\n    __typename\n  }\n}\n"}' -H "Authorization:Bearer ${Token:20:-27}"   2>&1)
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --compressed --max-time 10 "https://www.videomarket.jp/graphql" -X POST -H "Content-Type: application/json" -d '{"operationName":"readStatus","variables":{},"query":"query readStatus {\n  readStatus {\n    isRead\n    __typename\n  }\n}\n"}' -H "Authorization:Bearer ${Token:20:-27}"   2>&1)
     if [[ "$tmpresult" == "curl"* ]]; then
         print_network_failure "VideoMarket:\t\t\t\t" "$1" "www.videomarket.jp"
         return
@@ -4069,12 +4043,11 @@ function JP_UnlockTest() {
     MediaUnlockTest_AbemaTV_IPTest ${1} &
     MediaUnlockTest_Niconico ${1} &
     MediaUnlockTest_Telasa ${1} &
-    MediaUnlockTest_Paravi ${1} &
     MediaUnlockTest_unext ${1} &
     MediaUnlockTest_HuluJP ${1} &
     )
     wait
-    local array=("NHK+" "DMM TV:" "Abema.TV:" "Niconico:" "Telasa:" "Paravi:" "U-NEXT:" "Hulu Japan:")
+    local array=("NHK+" "DMM TV:" "Abema.TV:" "Niconico:" "Telasa:" "U-NEXT:" "Hulu Japan:")
     echo_Result ${result} ${array}
     local result=$(
     MediaUnlockTest_TVer ${1} &
@@ -4097,12 +4070,11 @@ function JP_UnlockTest() {
     local result=$(
     MediaUnlockTest_Kancolle ${1} &
     MediaUnlockTest_UMAJP ${1} &
-    MediaUnlockTest_KonosubaFD ${1} &
     MediaUnlockTest_PCRJP ${1} &
     MediaUnlockTest_ProjectSekai ${1} &
     )
     wait
-    local array=("Kancolle Japan:" "Pretty Derby Japan:" "Konosuba Fantastic Days:" "Princess Connect Re:Dive Japan:" "World Flipper Japan:" "Project Sekai: Colorful Stage:")
+    local array=("Kancolle Japan:" "Pretty Derby Japan:" "Princess Connect Re:Dive Japan:" "World Flipper Japan:" "Project Sekai: Colorful Stage:")
     echo_Result ${result} ${array}
     ShowRegion Read
     local result=$(
