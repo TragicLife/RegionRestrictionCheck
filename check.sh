@@ -3689,13 +3689,21 @@ function MediaUnlockTest_NHKPlus() {
 
 function MediaUnlockTest_Tiktok() {
     local result=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} -fsSL --max-time 10  --output /dev/null -w %{url_effective} "https://www.tiktok.com/" 2>&1)
-    local result1=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} -fsSL --max-time 10 -X POST "https://www.tiktok.com/passport/web/store_region/" 2>&1)
     if [[ "$result" == "curl"* ]]; then
         print_network_failure "Tiktok:\t\t\t\t" "$1" "www.tiktok.com"
         return
     fi
-    local region="$(echo "${result1}" | json_query ".data.store_region" | tr -d '"' )"
-    if [[ "$result" == *"/about" ]] || [[ "$result" == *"/status"* ]] || [[ "$result" == *"landing"* ]]; then
+    # Do not follow redirects: in blocked regions store_region 302s to /<region>/about,
+    # and re-POSTing there returns 405. The region is then taken from the redirect URL.
+    local result1=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} -sS --max-time 10 -X POST -w '\n%{redirect_url}' "https://www.tiktok.com/passport/web/store_region/" 2>&1)
+    local redirect="${result1##*$'\n'}"
+    local region=""
+    if [[ -z "$redirect" ]]; then
+        region="$(echo "${result1%$'\n'*}" | json_query ".data.store_region" | tr -d '"')"
+    elif [[ "$redirect" =~ tiktok\.com/([a-zA-Z]{2})/ ]]; then
+        region="${BASH_REMATCH[1]}"
+    fi
+    if [[ "$result" == *"/about"* ]] || [[ "$result" == *"/status"* ]] || [[ "$result" == *"landing"* ]]; then
         if [[ "$region" == "cn" ]]; then
             echo -n -e "\r Tiktok:\t\t\t\t${Font_Yellow}Provided by Douyin${Font_Suffix}\n"
             return
