@@ -210,7 +210,7 @@ has_ipv6_address() {
 # $4: optional detail appended to the failure, e.g. "[2]"
 print_network_failure() {
     if [[ "$2" == "6" ]] && ! has_ipv6_address "$3"; then
-        echo -n -e "\r ${1}${Font_Red}IPv6 Not Support${Font_Suffix}\n"
+        echo -n -e "\r ${1}${Font_Yellow}IPv6 Not Supported${Font_Suffix}\n"
     else
         echo -n -e "\r ${1}${Font_Red}Failed (Network Connection${4})${Font_Suffix}\n"
     fi
@@ -518,7 +518,8 @@ function MediaUnlockTest_Dazn() {
         echo -n -e "\r Dazn:\t\t\t\t\t${Font_Red}No  (Banned)${Font_Suffix}\n"
         return
     fi
-    # CloudFront also rejects some HTTP clients regardless of the IP.
+    # CloudFront also rejects curl's TLS fingerprint regardless of the IP;
+    # a Chrome-impersonating curl passed with -C gets through.
     if [[ "$tmpresult" == *"Request blocked."* ]]; then
         echo -n -e "\r Dazn:\t\t\t\t\t${Font_Red}Failed (Request Blocked)${Font_Suffix}\n"
         return
