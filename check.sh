@@ -2804,10 +2804,10 @@ function MediaUnlockTest_VideoMarket() {
 }
 
 function MediaUnlockTest_J:COM_ON_DEMAND() {
-	local result=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -fsL --write-out %{http_code} --output /dev/null --max-time 10 "https://auth.id2.zaq.ne.jp" 2>&1)
+	local result=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -fsL --write-out %{http_code} --output /dev/null --max-time 10 "https://auth.id2.zaq.ne.jp/api/connect/v1/authz?scope=openid+profile+http%3A%2F%2Fjcom.co.jp%2Fconnect%2Fprofile%2Fstandard_new+http%3A%2F%2Fjcom.co.jp%2Fconnect%2Fprofile%2Fstandard_plus&response_type=code+id_token&client_id=pid_front&redirect_uri=https%3A%2F%2Fid.zaq.ne.jp%2Fid%2Fscript%2Fconnect%2Fauthz_req%2FgetFlagParam.html%3Fclient_url%3Dhttps%3A%2F%2Fid.zaq.ne.jp%2Fpidefront%2Findex.php&code_challenge_method=&code_challenge=&prompt=&state=&nonce=JsY2r6aYPlOovoqAHpbCafntXuxjhk78&login_hint=&acr_values=" 2>&1)
 	if [ "$result" = "000" ]; then
         print_network_failure "J:com On Demand:\t\t\t" "$1" "auth.id2.zaq.ne.jp"
-    elif [ "$result" = "404" ]; then
+    elif [ "$result" = "200" ]; then
         echo -n -e "\r J:com On Demand:\t\t\t${Font_Green}Yes${Font_Suffix}\n"
     elif [ "$result" = "403" ]; then
         echo -n -e "\r J:com On Demand:\t\t\t${Font_Red}No${Font_Suffix}\n"
