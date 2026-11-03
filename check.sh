@@ -282,10 +282,27 @@ run_check() {
     fi
     rm -f "$CF_WAF_MARK"
 }
+# Print the public IPv4/IPv6 address. Cloudflare's trace is tried first; when it is
+# unreachable (blocked, filtered, slow), backup services are used before concluding
+# that the IP version has no connectivity.
+# $1: 4 or 6
+get_public_ip() {
+    local ip url
+    ip=$(curl $curlArgs -${1} -s --max-time 10 "https://www.cloudflare.com/cdn-cgi/trace" 2>/dev/null | grep '^ip=' | cut -d= -f2)
+    for url in "https://api64.ipify.org" "https://api.ip.sb/ip" "https://icanhazip.com"; do
+        if [[ "$1" == "4" && "$ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || [[ "$1" == "6" && "$ip" == *:* ]]; then
+            break
+        fi
+        ip=$(curl $curlArgs -${1} -s --max-time 5 --user-agent "${UA_Browser}" "$url" 2>/dev/null | tr -d '[:space:]')
+    done
+    if [[ "$1" == "4" && "$ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || [[ "$1" == "6" && "$ip" =~ ^[0-9A-Fa-f:]+$ && "$ip" == *:* ]]; then
+        echo "$ip"
+    fi
+}
+
 if [ -z "$func" ]; then
-    local_ipv4=$(curl $curlArgs -4 -s --max-time 10 cloudflare.com/cdn-cgi/trace | grep ip | awk -F= '{print $2}' &)
-    local_ipv6=$(curl $curlArgs -6 -s --max-time 20 cloudflare.com/cdn-cgi/trace | grep ip | awk -F= '{print $2}' &)
-    wait
+    local_ipv4=$(get_public_ip 4)
+    local_ipv6=$(get_public_ip 6)
     # bgptools_v4=$(curl $curlArgs -s -4 --max-time 10 --user-agent "${UA_Browser}" "https://v4.bgp.tools/whoami-not-for-robots" &)
     # bgptools_v6=$(curl $curlArgs -s -6 --max-time 10 --user-agent "${UA_Browser}" "https://v6.bgp.tools/whoami-not-for-robots" &)
     ripe_stat_v4=$(curl $curlArgs -s --max-time 10 "https://stat.ripe.net/data/prefix-overview/data.json?resource=$local_ipv4" &)
@@ -617,19 +634,15 @@ function MediaUnlockTest_Dazn() {
 }
 
 function MediaUnlockTest_HuluJP() {
-    local result=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -s -o /dev/null -L --max-time 10 -w '%{url_effective}%{http_code}\n' "https://id.hulu.jp" -H 'Priority: u=1' -H 'Accept: */*;q=0.8' -H 'Accept-Language: en-US,en;q=0.5' -H 'Accept-Encoding: none' -H 'Sec-Ch-Ua-Mobile: ?0' -H 'Sec-Ch-Ua-Platform: ?0' -H 'Sec-Fetch-Dest: document' -H 'Sec-Fetch-Mode: navigate' -H 'Sec-Fetch-Site: none' -H 'Sec-Fetch-User: ?1' -H 'Upgrade-Insecure-Requests: 1' 2>&1 | grep -E 'restrict|403|000')
+    # id.hulu.jp serves its login page to Japanese IPs and 403 to everything else.
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 -o /dev/null -w '%{http_code}' "https://id.hulu.jp/" -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' -H 'Accept-Language: ja,en-US;q=0.9,en;q=0.8' 2>/dev/null)
 
-    if [ -n "$result" ]; then
-        echo -n -e "\r Hulu Japan:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
-        return
-    else
-        echo -n -e "\r Hulu Japan:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
-        return
-    fi
-
-    print_network_failure "Hulu Japan:\t\t\t\t" "$1" "id.hulu.jp"
-    return
-
+    case "$tmpresult" in
+        '200') echo -n -e "\r Hulu Japan:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n" ;;
+        '403') echo -n -e "\r Hulu Japan:\t\t\t\t${Font_Red}No${Font_Suffix}\n" ;;
+        '000' | '') print_network_failure "Hulu Japan:\t\t\t\t" "$1" "id.hulu.jp" ;;
+        *) echo -n -e "\r Hulu Japan:\t\t\t\t${Font_Red}Failed (Error: ${tmpresult})${Font_Suffix}\n" ;;
+    esac
 }
 
 function MediaUnlockTest_MyTVSuper() {
@@ -1093,31 +1106,14 @@ function MediaUnlockTest_Niconico() {
         return
     fi
 
-    # Video is watchable; check official live with a free, already-ended official anime episode from the live top page.
-    local livepage=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 -H 'accept-language: en-US,en;q=0.9' "https://live.nicovideo.jp/?cmnhd_ref=device=pc&site=nicolive&pos=header_servicelink&ref=WatchPage-Anchor" 2>&1)
-    if [[ "$livepage" == "curl"* ]]; then
-        print_network_failure "Niconico:\t\t\t\t" "$1" "live.nicovideo.jp" " [2]"
-        return
+    # The viewer country as Niconico sees it is only exposed on live program pages (userProgramWatch.country).
+    local liveid=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 "https://live.nicovideo.jp/" 2>/dev/null | grep -Eo 'nicoliveProgramId&quot;:&quot;lv[0-9]+' | head -n1 | grep -Eo 'lv[0-9]+')
+    local region=""
+    if [ -n "$liveid" ]; then
+        region=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 "https://live.nicovideo.jp/watch/${liveid}" 2>/dev/null | sed 's/&quot;/"/g' | grep -F '"userProgramWatch":{' | head -n1 | sed 's/.*"userProgramWatch":{//' | cut -c1-400 | grep -Eo '"country":"[A-Za-z]+"' | head -n1 | cut -d'"' -f4)
     fi
-    local liveid=$(echo "$livepage" | sed 's/&quot;/"/g' | awk '{gsub(/\{"type":"seed"/, "\n&"); print}' | grep '^{"type":"seed"' | grep '"providerType":"official"' | grep '"payment":false' | grep '"isFollowerOnly":false' | grep -v '"status":"ON_AIR"' | grep '話' | head -n1 | grep -Eo '"nicoliveProgramId":"lv[0-9]+"' | head -n1 | cut -d'"' -f4)
-    if [ -z "$liveid" ]; then
-        echo -n -e "\r Niconico:\t\t\t\t${Font_Yellow}Yes (Official Live Unknown)${Font_Suffix}\n"
-        return
-    fi
-    local livewatch=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 -H 'accept-language: en-US,en;q=0.9' "https://live.nicovideo.jp/watch/${liveid}" 2>&1)
-    if [[ "$livewatch" == "curl"* ]]; then
-        print_network_failure "Niconico:\t\t\t\t" "$1" "live.nicovideo.jp" " [3]"
-        return
-    fi
-    # userProgramWatch carries the viewer country as Niconico sees it; official live programs are Japan only.
-    local userwatch=$(echo "$livewatch" | sed 's/&quot;/"/g' | grep -Eo '"userProgramWatch":\{.{0,400}' | head -n1)
-    local region=$(echo "$userwatch" | grep -Eo '"country":"[A-Za-z]+"' | head -n1 | cut -d'"' -f4)
-    if [[ "$livewatch" == *"notAllowedCountry"* ]] || [[ "$userwatch" == *'"isCountryRestrictionTarget":true'* ]] || { [ -n "$region" ] && [[ "${region^^}" != "JP" ]]; }; then
-        echo -n -e "\r Niconico:\t\t\t\t${Font_Yellow}Yes (Official Live Unavailable${region:+, Region: ${region^^}})${Font_Suffix}\n"
-        return
-    fi
-    if [ -z "$region" ]; then
-        echo -n -e "\r Niconico:\t\t\t\t${Font_Yellow}Yes (Official Live Unknown)${Font_Suffix}\n"
+    if [ -n "$region" ]; then
+        echo -n -e "\r Niconico:\t\t\t\t${Font_Green}Yes (Region: ${region^^})${Font_Suffix}\n"
         return
     fi
     echo -n -e "\r Niconico:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
