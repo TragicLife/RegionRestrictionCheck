@@ -3688,20 +3688,30 @@ function MediaUnlockTest_NHKPlus() {
 }
 
 function MediaUnlockTest_Tiktok() {
-    local result=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} -fsSL --max-time 10  --output /dev/null -w %{url_effective} "https://www.tiktok.com/" 2>&1)
-    if [[ "$result" == "curl"* ]]; then
+    local page=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} -fsSL --max-time 10 -w '\n%{url_effective}' "https://www.tiktok.com/" 2>&1)
+    if [[ "$page" == "curl"* ]]; then
         print_network_failure "Tiktok:\t\t\t\t" "$1" "www.tiktok.com"
         return
     fi
+    local result="${page##*$'\n'}"
+    page="${page%$'\n'*}"
     # Do not follow redirects: in blocked regions store_region 302s to /<region>/about,
     # and re-POSTing there returns 405. The region is then taken from the redirect URL.
-    local result1=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} -sS --max-time 10 -X POST -w '\n%{redirect_url}' "https://www.tiktok.com/passport/web/store_region/" 2>&1)
-    local redirect="${result1##*$'\n'}"
+    local result1=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} -sS --max-time 10 -X POST -w '@@REDIRECT@@%{redirect_url}' "https://www.tiktok.com/passport/web/store_region/" 2>&1)
+    local redirect="${result1##*@@REDIRECT@@}"
+    result1="${result1%@@REDIRECT@@*}"
     local region=""
     if [[ -z "$redirect" ]]; then
-        region="$(echo "${result1%$'\n'*}" | json_query ".data.store_region" | tr -d '"')"
+        region="$(echo "${result1}" | json_query ".data.store_region" | tr -d '"')"
     elif [[ "$redirect" =~ tiktok\.com/([a-zA-Z]{2})/ ]]; then
         region="${BASH_REMATCH[1]}"
+    fi
+    # Fallback: the web app embeds the region in its rehydration data, e.g. "region":"US"
+    if [[ -z "$region" ]]; then
+        region="$(printf '%s' "$page" | grep -oE '"(storeRegion|region)":"[A-Za-z]{2}"' | head -n 1 | cut -d'"' -f4)"
+    fi
+    if [[ -z "$region" ]] && [ -n "$DEBUG" ]; then
+        echo "[${FUNCNAME[0]}] no region found; url_effective=${result}; store_region=$(printf '%s' "$result1" | head -c 300 | tr -d '\n')" >&2
     fi
     if [[ "$result" == *"/about"* ]] || [[ "$result" == *"/status"* ]] || [[ "$result" == *"landing"* ]]; then
         if [[ "$region" == "cn" ]]; then
