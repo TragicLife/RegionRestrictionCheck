@@ -590,7 +590,7 @@ function MediaUnlockTest_Dazn() {
         return
     fi
     if [[ "$httpcode" == "403" ]]; then
-        echo -n -e "\r Dazn:\t\t\t\t\t${Font_Red}No  (Banned)${Font_Suffix}\n"
+        echo -n -e "\r Dazn:\t\t\t\t\t${Font_Red}No (Banned)${Font_Suffix}\n"
         return
     fi
     local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS --max-time 10 "https://startup.core.indazn.com/v1/main/web?Platform=web&LandingPageKey=generic&Brand=dazn" 2>&1)
@@ -599,13 +599,13 @@ function MediaUnlockTest_Dazn() {
         return
     fi
     if [[ "$tmpresult" == *"Security policy has been breached"* ]]; then
-        echo -n -e "\r Dazn:\t\t\t\t\t${Font_Red}No  (Banned)${Font_Suffix}\n"
+        echo -n -e "\r Dazn:\t\t\t\t\t${Font_Red}No (Banned)${Font_Suffix}\n"
         return
     fi
     # CloudFront also rejects curl's TLS fingerprint regardless of the IP;
     # a Chrome-impersonating curl passed with -C gets through.
     if [[ "$tmpresult" == *"Request blocked."* ]]; then
-        echo -n -e "\r Dazn:\t\t\t\t\t${Font_Red}Failed (Request Blocked)${Font_Suffix}\n"
+        echo -n -e "\r Dazn:\t\t\t\t\t${Font_Yellow}Maybe (WAF Blocked)${Font_Suffix}\n"
         return
     fi
     # Anything else that isn't JSON (CloudFront/WAF error pages, etc.)
