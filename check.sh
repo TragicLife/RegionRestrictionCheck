@@ -4176,7 +4176,7 @@ function MediaUnlockTest_BingSearch() {
     # A cookie jar is needed: bing.com first redirects to /?brdr=1 and expects the cookie back.
     local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL -b "" --max-time 10 -w '\n%{http_code}' "https://www.bing.com" 2>&1)
     if [[ "$tmpresult" == "curl"* ]]; then
-        print_network_failure "Bing:\t\t\t\t" "$1" "www.bing.com"
+        print_network_failure "Bing:\t\t\t\t\t" "$1" "www.bing.com"
         return
     fi
     local httpcode=${tmpresult##*$'\n'}
@@ -4189,35 +4189,32 @@ function MediaUnlockTest_BingSearch() {
         region=$(echo "$tmpresult" | grep -Eo 'Region:"[^"]*"' | head -n1 | cut -d'"' -f2)
     fi
     if [[ "$region" == "CN" || -z "$region" ]] && [[ "$tmpresult" == *"cn.bing.com"* ]]; then
-        echo -n -e "\r Bing:\t\t\t\t${Font_Yellow}Only cn.bing.com (Region: CN)${risky}${Font_Suffix}\n"
+        echo -n -e "\r Bing:\t\t\t\t\t${Font_Yellow}Only cn.bing.com (Region: CN)${risky}${Font_Suffix}\n"
         return
     fi
     if [ -n "$region" ]; then
         if [ -n "$risky" ]; then
-            echo -n -e "\r Bing:\t\t\t\t${Font_Yellow}Yes (Region: ${region^^})${risky}${Font_Suffix}\n"
+            echo -n -e "\r Bing:\t\t\t\t\t${Font_Yellow}Yes (Region: ${region^^})${risky}${Font_Suffix}\n"
         else
-            echo -n -e "\r Bing:\t\t\t\t${Font_Green}Yes (Region: ${region^^})${Font_Suffix}\n"
+            echo -n -e "\r Bing:\t\t\t\t\t${Font_Green}Yes (Region: ${region^^})${Font_Suffix}\n"
         fi
         return
     fi
     if [[ "$httpcode" == "403" ]] || [[ "$httpcode" == "451" ]]; then
-        echo -n -e "\r Bing:\t\t\t\t${Font_Red}No  (Banned)${risky}${Font_Suffix}\n"
+        echo -n -e "\r Bing:\t\t\t\t\t${Font_Red}No  (Banned)${risky}${Font_Suffix}\n"
         return
     fi
-    echo -n -e "\r Bing:\t\t\t\t${Font_Red}Failed (Unexpected Result: ${httpcode})${Font_Suffix}\n"
+    echo -n -e "\r Bing:\t\t\t\t\t${Font_Red}Failed (Unexpected Result: ${httpcode})${Font_Suffix}\n"
 }
 
 function MediaUnlockTest_Microsoft() {
-    # Searching "weather" makes Bing render the detected location under the search bar.
-    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL -b "" --max-time 10 -H 'accept-language: en-US,en;q=0.9' "https://www.bing.com/search?q=weather" 2>&1)
+    # MSN Weather embeds the IP-detected location (same one Bing shows for "weather") in its page state.
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 -H 'accept-language: en-US,en;q=0.9' "https://www.msn.com/en-us/weather/forecast" 2>&1)
     if [[ "$tmpresult" == "curl"* ]]; then
-        print_network_failure "Microsoft:\t\t\t\t" "$1" "www.bing.com"
+        print_network_failure "Microsoft:\t\t\t\t" "$1" "www.msn.com"
         return
     fi
-    local location=$(echo "$tmpresult" | grep -o 'id="g_EfLoc"[^>]*data-disp="[^"]*"' | head -n1 | sed 's/.*data-disp="//; s/"$//')
-    if [ -z "$location" ]; then
-        location=$(echo "$tmpresult" | awk -F'class="locTw"' 'NF>1{print $2; exit}' | grep -o '</acf-icon><span[^>]*>[^<]*' | head -n1 | sed 's/.*>//')
-    fi
+    local location=$(echo "$tmpresult" | grep -o '"currentLocation":{[^}]*"isDetected":true[^}]*}' | head -n1 | grep -o '"displayName":"[^"]*"' | cut -d'"' -f4)
     if [ -z "$location" ]; then
         echo -n -e "\r Microsoft:\t\t\t\t${Font_Red}Failed (Unknown Location)${Font_Suffix}\n"
         return
