@@ -1513,7 +1513,7 @@ function MediaUnlockTest_HotStar() {
         if [ -n "$region" ] && [ "$region" = "$site_region" ]; then
             echo -n -e "\r HotStar:\t\t\t\t${Font_Green}Yes${region_note}${Font_Suffix}\n"
         else
-            echo -n -e "\r HotStar:\t\t\t\t${Font_Red}No${region_note}${Font_Suffix}\n"
+            echo -n -e "\r HotStar:\t\t\t\t${Font_Red}No ${region_note}${Font_Suffix}\n"
         fi
         return
     else
