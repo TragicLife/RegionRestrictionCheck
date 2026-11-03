@@ -4211,15 +4211,15 @@ function MediaUnlockTest_Microsoft() {
     # MSN Weather embeds the IP-detected location (same one Bing shows for "weather") in its page state.
     local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 -H 'accept-language: en-US,en;q=0.9' "https://www.msn.com/en-us/weather/forecast" 2>&1)
     if [[ "$tmpresult" == "curl"* ]]; then
-        print_network_failure "Microsoft:\t\t\t\t" "$1" "www.msn.com"
+        print_network_failure "Microsoft Location:\t\t\t" "$1" "www.msn.com"
         return
     fi
     local location=$(echo "$tmpresult" | grep -o '"currentLocation":{[^}]*"isDetected":true[^}]*}' | head -n1 | grep -o '"displayName":"[^"]*"' | cut -d'"' -f4)
     if [ -z "$location" ]; then
-        echo -n -e "\r Microsoft:\t\t\t\t${Font_Red}Failed (Unknown Location)${Font_Suffix}\n"
+        echo -n -e "\r Microsoft Location:\t\t\t${Font_Red}Failed (Unknown)${Font_Suffix}\n"
         return
     fi
-    echo -n -e "\r Microsoft:\t\t\t\t${Font_Green}${location}${Font_Suffix}\n"
+    echo -n -e "\r Microsoft Location:\t\t\t${Font_Green}${location}${Font_Suffix}\n"
 }
 
 function MediaUnlockTest_Reddit() {
@@ -4666,7 +4666,7 @@ function Global_UnlockTest() {
         )
     fi
     wait
-    local array=("Dazn:" "HotStar:" "Disney+:" "Netflix:" "YouTube Premium:" "Amazon Prime Video:" "TVBAnywhere+:" "iQyi Oversea:" "Bilibili Anime:" "Viu.com:" "Tiktok" "YouTube CDN:" "Google Location:" "Google Play Store:" "Google Gemini:" "YouTube Region:" "Netflix Preferred CDN:" "Wikipedia" "Bing:" "Microsoft:" "Reddit:" "X (formerly Twitter):" "Apple:" "Facebook:" "Spotify" "Steam Currency:" "Instagram")
+    local array=("Dazn:" "HotStar:" "Disney+:" "Netflix:" "YouTube Premium:" "Amazon Prime Video:" "TVBAnywhere+:" "iQyi Oversea:" "Bilibili Anime:" "Viu.com:" "Tiktok" "YouTube CDN:" "Google Location:" "Google Play Store:" "Google Gemini:" "YouTube Region:" "Netflix Preferred CDN:" "Wikipedia" "Bing:" "Microsoft Location:" "Reddit:" "X (formerly Twitter):" "Apple:" "Facebook:" "Spotify" "Steam Currency:" "Instagram")
     echo_Result ${result} ${array}
     echo "======================================="
 }
