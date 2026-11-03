@@ -1067,7 +1067,7 @@ function MediaUnlockTest_LineTV.TW() {
 function MediaUnlockTest_Viu.com() {
     local tmpresult=$(curl $curlArgs -${1} -sS -o /dev/null -L --max-time 10 -w '%{url_effective}\n' "https://www.viu.com/" 2>&1)
     local banresult=$(curl $curlArgs -${1} -SsL --max-time 10 "https://d3o7oi00quuwqu.cloudfront.net" 2>&1)
-    if [ "$tmpresult" = "000" ] || [ "$banresult" == "curl"* ]; then
+    if [ "$tmpresult" = "000" ] || [[ "$banresult" == "curl"* ]]; then
         print_network_failure "Viu.com:\t\t\t\t" "$1" "www.viu.com"
         return
     fi
@@ -4817,9 +4817,9 @@ function SEA_UnlockTest(){
 function AF_UnlockTest() {
     echo "==============[ Africa ]=============="
     local result=$(
-        run_check MediaUnlockTest_DStv &
+        run_check MediaUnlockTest_DStv ${1} &
         # MediaUnlockTest_Showmax &
-        run_check MediaUnlockTest_Viu.com &
+        run_check MediaUnlockTest_Viu.com ${1} &
         # MediaUnlockTest_ParamountPlus &
     )
     wait
