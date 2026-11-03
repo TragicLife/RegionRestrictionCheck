@@ -499,7 +499,17 @@ function MediaUnlockTest_DisneyPlus() {
 }
 
 function MediaUnlockTest_Dazn() {
-    local tmpresult=$(curl $curlArgs -${1} -sS --max-time 10 -X POST -H "Content-Type: application/json" -d '{"LandingPageKey":"generic","Languages":"en","Platform":"web","PlatformAttributes":{},"Manufacturer":"","PromoCode":"","Version":"2"}' "https://startup.core.indazn.com/misl/v5/Startup" 2>&1)
+    # The website answers 403 to banned IPs before the region API is consulted.
+    local httpcode=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS -o /dev/null -w '%{http_code}' --max-time 10 "https://www.dazn.com/" 2>&1)
+    if [[ "$httpcode" == "curl"* ]]; then
+        print_network_failure "Dazn:\t\t\t\t\t" "$1" "www.dazn.com"
+        return
+    fi
+    if [[ "$httpcode" == "403" ]]; then
+        echo -n -e "\r Dazn:\t\t\t\t\t${Font_Red}No  (Banned)${Font_Suffix}\n"
+        return
+    fi
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS --max-time 10 "https://startup.core.indazn.com/v1/main/web?Platform=web&LandingPageKey=generic&Brand=dazn" 2>&1)
     if [[ "$tmpresult" == "curl"* ]]; then
         print_network_failure "Dazn:\t\t\t\t\t" "$1" "startup.core.indazn.com"
         return
@@ -508,8 +518,9 @@ function MediaUnlockTest_Dazn() {
         echo -n -e "\r Dazn:\t\t\t\t\t${Font_Red}No  (Banned)${Font_Suffix}\n"
         return
     fi
-    if [[ "$tmpresult" == *"Forbidden"* ]] || [[ "$tmpresult" == *"Request blocked."* ]]; then
-        echo -n -e "\r Dazn:\t\t\t\t\t${Font_Red}No  (Banned)${Font_Suffix}\n"
+    # CloudFront also rejects some HTTP clients regardless of the IP.
+    if [[ "$tmpresult" == *"Request blocked."* ]]; then
+        echo -n -e "\r Dazn:\t\t\t\t\t${Font_Red}Failed (Request Blocked)${Font_Suffix}\n"
         return
     fi
     # Anything else that isn't JSON (CloudFront/WAF error pages, etc.)
@@ -517,14 +528,19 @@ function MediaUnlockTest_Dazn() {
         echo -n -e "\r Dazn:\t\t\t\t\t${Font_Red}Failed (Unexpected Result)${Font_Suffix}\n"
         return
     fi
-    local isAllowed=$(echo $tmpresult | json_query .Region.isAllowed)
-    local region=$(echo $tmpresult | json_query .Region.GeolocatedCountry | tr -d '"')
+    local isAllowed=$(echo "$tmpresult" | json_query .Region.isAllowed)
+    local region=$(echo "$tmpresult" | json_query -r .Region.GeolocatedCountry)
+    local reason=$(echo "$tmpresult" | json_query -r '.Region.disallowedReason // empty')
 
     if [[ "$isAllowed" == "true" ]]; then
         echo -n -e "\r Dazn:\t\t\t\t\t${Font_Green}Yes (Region: ${region^^})${Font_Suffix}\n"
         return
     elif [[ "$isAllowed" == "false" ]]; then
-        echo -n -e "\r Dazn:\t\t\t\t\t${Font_Red}No${Font_Suffix}\n"
+        if [ -n "$reason" ]; then
+            echo -n -e "\r Dazn:\t\t\t\t\t${Font_Red}No  (${reason})${Font_Suffix}\n"
+        else
+            echo -n -e "\r Dazn:\t\t\t\t\t${Font_Red}No${Font_Suffix}\n"
+        fi
         return
     else
         echo -n -e "\r Dazn:\t\t\t\t\t${Font_Red}Unsupport${Font_Suffix}\n"
@@ -940,25 +956,21 @@ function MediaUnlockTest_Salto() {
 }
 
 function MediaUnlockTest_LineTV.TW() {
-    local tmpresult=$(curl $curlArgs -${1} -sS --max-time 10 "https://www.linetv.tw/api/part/11829/eps/1/part?chocomemberId=&appId=062097f1b1f34e11e7f82aag22000aee" 2>&1)
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 "https://www.linetv.tw/drama/11829/eps/1" 2>&1)
     if [[ "$tmpresult" = "curl"* ]]; then
         print_network_failure "LineTV.TW:\t\t\t\t" "$1" "www.linetv.tw"
         return
     fi
-    result=$(echo $tmpresult | json_query . | grep 'countryCode' | awk '{print $2}' | cut -f1 -d',')
-    if [ -n "$result" ]; then
-        if [ "$result" = "228" ]; then
-            echo -n -e "\r LineTV.TW:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
-            return
-        else
-            echo -n -e "\r LineTV.TW:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
-            return
-        fi
-    else
-        echo -n -e "\r LineTV.TW:\t\t\t\t${Font_Red}Failed (Unexpected Result: $result)${Font_Suffix}\n"
+    if [[ "$tmpresult" != *"window.__INITIAL_STATE__"* ]]; then
+        echo -n -e "\r LineTV.TW:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
         return
     fi
-
+    # Episode details are only embedded in the page state when playback is allowed.
+    if echo "$tmpresult" | grep -qE '"eps_info" *: *\[' && echo "$tmpresult" | grep -qE '"durationInMs" *: *[0-9]+'; then
+        echo -n -e "\r LineTV.TW:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
+        return
+    fi
+    echo -n -e "\r LineTV.TW:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
 }
 
 function MediaUnlockTest_Viu.com() {
@@ -1363,29 +1375,100 @@ function MediaUnlockTest_HotStar() {
 
 }
 
+# Print the SHA-256 hex digest of $1.
+sha256_hex() {
+    if command -v sha256sum &>/dev/null; then
+        printf '%s' "$1" | sha256sum | awk '{print $1}'
+    elif command -v shasum &>/dev/null; then
+        printf '%s' "$1" | shasum -a 256 | awk '{print $1}'
+    else
+        printf '%s' "$1" | openssl dgst -sha256 | awk '{print $NF}'
+    fi
+}
+
+# Print $1 (a non-negative integer) in base 36.
+to_base36() {
+    local n=$1 chars="0123456789abcdefghijklmnopqrstuvwxyz" out=""
+    while [ "$n" -gt 0 ]; do
+        out="${chars:$((n % 36)):1}${out}"
+        n=$((n / 36))
+    done
+    echo "${out:-0}"
+}
+
+# Print $1 random base-36 characters.
+random_base36() {
+    local chars="0123456789abcdefghijklmnopqrstuvwxyz" out="" i
+    for ((i = 0; i < $1; i++)); do
+        out="${out}${chars:$((RANDOM % 36)):1}"
+    done
+    echo "$out"
+}
+
 function MediaUnlockTest_LiTV() {
-    local tmpresult=$(curl $curlArgs -${1} -sS --max-time 10 -X POST 'https://www.litv.tv/api/get-urls-no-auth' -H 'content-type: application/json' -d '{"AssetId":"iNEWS","MediaType":"channel","puid":"b0b59472-72eb-4e06-b0b1-591716e4f9a4"}'  2>&1)
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSi --max-time 10 -X POST "https://www.litv.tv/api/generate-device-id" -H 'content-type: application/json' -H 'origin: https://www.litv.tv' -H 'referer: https://www.litv.tv/' 2>&1)
     if [[ "$tmpresult" = "curl"* ]]; then
         print_network_failure "LiTV:\t\t\t\t\t" "$1" "www.litv.tv"
         return
     fi
-    result=$(echo $tmpresult | json_query .error.code)
-    if [[ "$result" != "null" ]]; then
-        if [ "$result" = "42000087" ]; then
-            echo -n -e "\r LiTV:\t\t\t\t\t${Font_Red}No${Font_Suffix}\n"
-            return
-        elif [ "$result" = "42000075" ]; then
-            echo -n -e "\r LiTV:\t\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
-            return
-        else
-            echo -n -e "\r LiTV:\t\t\t\t\t${Font_Red}Unknown (Code: $result)${Font_Suffix}\n"
-            return
-        fi
-    else
-        echo -n -e "\r LiTV:\t\t\t\t\t${Font_Red}Failed${Font_Suffix}\n"
+    local body=$(echo "$tmpresult" | sed '1,/^\r\{0,1\}$/d')
+    local deviceid=$(echo "$body" | json_query -r '.deviceId // ."device-id" // empty')
+    if [ -z "$deviceid" ]; then
+        deviceid=$(echo "$tmpresult" | grep -i '^set-cookie: *device-id=' | head -n1 | sed 's/^[^=]*=//; s/;.*//' | tr -d '\r')
+    fi
+    if [ -z "$deviceid" ]; then
+        echo -n -e "\r LiTV:\t\t\t\t\t${Font_Red}Failed (No Device ID)${Font_Suffix}\n"
         return
     fi
 
+    tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS --max-time 10 -X POST "https://proxy.svc.litv.tv/cdi/v2/rpc" -H 'content-type: application/json' -H 'origin: https://www.litv.tv' -H 'referer: https://www.litv.tv/drama/watch/VOD00328856' -d "{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"CCCService.GetProgramInformation\",\"params\":{\"version\":\"2.0\",\"project_num\":\"LTWEB02\",\"device_id\":\"${deviceid}\",\"swver\":\"LTWEB0210000WEB20190612185813\",\"content_id\":\"VOD00328856\",\"content_type\":\"drama\"}}" 2>&1)
+    if [[ "$tmpresult" = "curl"* ]]; then
+        print_network_failure "LiTV:\t\t\t\t\t" "$1" "proxy.svc.litv.tv"
+        return
+    fi
+    local rpcstatus=$(echo "$tmpresult" | json_query -r 'if .error != null then "no" elif (.result.data.content_id // "") != "" then "yes" else "no" end')
+    if [[ "$rpcstatus" == "yes" ]]; then
+        echo -n -e "\r LiTV:\t\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
+        return
+    elif [[ "$rpcstatus" == "no" ]]; then
+        echo -n -e "\r LiTV:\t\t\t\t\t${Font_Red}No${Font_Suffix}\n"
+        return
+    fi
+
+    # The RPC answer was not JSON: fall back to the signed legacy playback API.
+    tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS --max-time 10 -X POST "https://pusti.svc.litv.tv/puid" -H 'content-type: application/json' -H 'origin: https://www.litv.tv' -H 'referer: https://www.litv.tv/' -d '{"jsonrpc":"2.0","id":100,"method":"PustiService.PUID","params":{"version":"2.0","device_id":"","device_category":"LTWEB00","puid":"","aaid":"","idfa":""}}' 2>&1)
+    if [[ "$tmpresult" = "curl"* ]]; then
+        print_network_failure "LiTV:\t\t\t\t\t" "$1" "pusti.svc.litv.tv"
+        return
+    fi
+    local puid=$(echo "$tmpresult" | json_query -r '.result.puid // empty')
+    if [ -z "$puid" ]; then
+        echo -n -e "\r LiTV:\t\t\t\t\t${Font_Red}Failed (Unexpected Result)${Font_Suffix}\n"
+        return
+    fi
+    local assetid="vod70810-000001M001_1500K"
+    local mediatype="vod"
+    local timestamp=$(date +%s%3N)
+    if ! [[ "$timestamp" =~ ^[0-9]+$ ]]; then
+        timestamp="$(date +%s)000"
+    fi
+    local nonce="$(random_base36 26)$(to_base36 "$timestamp")"
+    local signature=$(sha256_hex "${assetid}${mediatype}${timestamp}${nonce}7f4a9c2e8b6d1f3a5e9c7b4d2f8a6e1c")
+    tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS --max-time 10 -w '\n%{http_code}' -X POST "https://www.litv.tv/api/get-urls-no-auth" -H 'content-type: application/json' -H 'origin: https://www.litv.tv' -H 'referer: https://www.litv.tv/drama/watch/VOD00328856' -H "cookie: device-id=${deviceid}; PUID=${puid}" -d "{\"AssetId\":\"${assetid}\",\"MediaType\":\"${mediatype}\",\"puid\":\"${puid}\",\"timestamp\":${timestamp},\"nonce\":\"${nonce}\",\"signature\":\"${signature}\"}" 2>&1)
+    if [[ "$tmpresult" = "curl"* ]]; then
+        print_network_failure "LiTV:\t\t\t\t\t" "$1" "www.litv.tv"
+        return
+    fi
+    local httpcode=${tmpresult##*$'\n'}
+    if [[ "$httpcode" != "200" ]]; then
+        echo -n -e "\r LiTV:\t\t\t\t\t${Font_Red}Failed (Unexpected Result: ${httpcode})${Font_Suffix}\n"
+        return
+    fi
+    if [[ "$tmpresult" == *"OutsideRegionError"* ]]; then
+        echo -n -e "\r LiTV:\t\t\t\t\t${Font_Red}No${Font_Suffix}\n"
+        return
+    fi
+    echo -n -e "\r LiTV:\t\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
 }
 
 function MediaUnlockTest_FridayVideo() {
@@ -3298,6 +3381,68 @@ function MediaUnlockTest_Google() {
     echo -n -e "\r Google Location:\t\t\t${Font_Green}${region:4:-6}${Font_Suffix}\n"
 }
 
+function MediaUnlockTest_GooglePlayStore() {
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 -w '\n%{http_code}' "https://play.google.com/store/games" \
+        -H 'accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7' \
+        -H 'accept-language: en-US;q=0.9' -H 'sec-fetch-dest: document' -H 'sec-fetch-mode: navigate' -H 'sec-fetch-site: none' -H 'sec-fetch-user: ?1' -H 'upgrade-insecure-requests: 1' 2>&1)
+    if [[ "$tmpresult" == "curl"* ]]; then
+        print_network_failure "Google Play Store:\t\t\t" "$1" "play.google.com"
+        return
+    fi
+    local httpcode=${tmpresult##*$'\n'}
+    if [[ "$httpcode" != "200" ]]; then
+        echo -n -e "\r Google Play Store:\t\t\t${Font_Red}Failed (Unexpected Result: ${httpcode})${Font_Suffix}\n"
+        return
+    fi
+    local region=$(echo "$tmpresult" | grep -Eo '"zQmIje" *: *"[^"]+"' | head -n1 | cut -d'"' -f4)
+    if [ -z "$region" ]; then
+        region=$(echo "$tmpresult" | grep -Eo '<div class="yVZQTb">[^<(]+' | head -n1 | sed 's/.*>//; s/ *$//')
+    fi
+    if [ -z "$region" ]; then
+        echo -n -e "\r Google Play Store:\t\t\t${Font_Red}No${Font_Suffix}\n"
+        return
+    fi
+    if [[ "${region^^}" == "CN" ]]; then
+        echo -n -e "\r Google Play Store:\t\t\t${Font_Red}No  (Region: CN)${Font_Suffix}\n"
+        return
+    fi
+    echo -n -e "\r Google Play Store:\t\t\t${Font_Green}Yes (Region: ${region^^})${Font_Suffix}\n"
+}
+
+function MediaUnlockTest_GoogleGemini() {
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 -w '\n%{http_code}' "https://gemini.google.com" 2>&1)
+    if [[ "$tmpresult" == "curl"* ]]; then
+        print_network_failure "Google Gemini:\t\t\t\t" "$1" "gemini.google.com"
+        return
+    fi
+    local httpcode=${tmpresult##*$'\n'}
+    if [[ "$httpcode" == "403" ]] || [[ "$httpcode" == "451" ]]; then
+        echo -n -e "\r Google Gemini:\t\t\t\t${Font_Red}No  (Banned)${Font_Suffix}\n"
+        return
+    fi
+    if [[ "$httpcode" != "200" ]]; then
+        echo -n -e "\r Google Gemini:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
+        return
+    fi
+    # The page reports the ISO 3166-1 alpha-3 code; only supported countries are mapped to alpha-2.
+    local region3=$(echo "$tmpresult" | grep -Eo ',2,1,200,"[A-Z]{3}"' | head -n1 | cut -d'"' -f2)
+    local supported="ABW:AW AGO:AO AIA:AI ALA:AX ALB:AL AND:AD ARE:AE ARG:AR ARM:AM ASM:AS ATA:AQ ATF:TF ATG:AG AUS:AU AUT:AT AZE:AZ BDI:BI BEL:BE BEN:BJ BES:BQ BFA:BF BGD:BD BGR:BG BHR:BH BHS:BS BIH:BA BLM:BL BLZ:BZ BMU:BM BOL:BO BRA:BR BRB:BB BRN:BN BTN:BT BWA:BW CAF:CF CAN:CA CCK:CC CHE:CH CHL:CL CIV:CI CMR:CM COD:CD COG:CG COK:CK COL:CO COM:KM CPV:CV CRI:CR CUW:CW CXR:CX CYM:KY CYP:CY CZE:CZ DEU:DE DJI:DJ DMA:DM DNK:DK DOM:DO DZA:DZ ECU:EC EGY:EG ERI:ER ESH:EH ESP:ES EST:EE ETH:ET FIN:FI FJI:FJ FLK:FK FRA:FR FRO:FO FSM:FM GAB:GA GBR:GB GEO:GE GGY:GG GHA:GH GIB:GI GIN:GN GLP:GP GMB:GM GNB:GW GNQ:GQ GRC:GR GRD:GD GRL:GL GTM:GT GUF:GF GUM:GU GUY:GY HMD:HM HND:HN HRV:HR HTI:HT HUN:HU IDN:ID IMN:IM IND:IN IOT:IO IRL:IE IRQ:IQ ISL:IS ISR:IL ITA:IT JAM:JM JEY:JE JOR:JO JPN:JP KAZ:KZ KEN:KE KGZ:KG KHM:KH KIR:KI KNA:KN KOR:KR KWT:KW LAO:LA LBN:LB LBR:LR LBY:LY LCA:LC LIE:LI LKA:LK LSO:LS LTU:LT LUX:LU LVA:LV MAF:MF MAR:MA MCO:MC MDA:MD MDG:MG MDV:MV MEX:MX MHL:MH MKD:MK MLI:ML MLT:MT MMR:MM MNE:ME MNG:MN MNP:MP MOZ:MZ MRT:MR MSR:MS MTQ:MQ MUS:MU MWI:MW MYS:MY MYT:YT NAM:NA NCL:NC NER:NE NFK:NF NGA:NG NIC:NI NIU:NU NLD:NL NOR:NO NPL:NP NRU:NR NZL:NZ OMN:OM PAK:PK PAN:PA PCN:PN PER:PE PHL:PH PLW:PW PNG:PG POL:PL PRI:PR PRT:PT PRY:PY PSE:PS PYF:PF QAT:QA REU:RE ROU:RO RWA:RW SAU:SA SDN:SD SEN:SN SGP:SG SGS:GS SHN:SH SJM:SJ SLB:SB SLE:SL SLV:SV SMR:SM SOM:SO SPM:PM SRB:RS SSD:SS STP:ST SUR:SR SVK:SK SVN:SI SWE:SE SWZ:SZ SXM:SX SYC:SC TCA:TC TCD:TD TGO:TG THA:TH TJK:TJ TKL:TK TKM:TM TLS:TL TON:TO TTO:TT TUN:TN TUR:TR TUV:TV TWN:TW TZA:TZ UGA:UG UKR:UA UMI:UM URY:UY USA:US UZB:UZ VAT:VA VCT:VC VEN:VE VGB:VG VIR:VI VNM:VN VUT:VU WLF:WF WSM:WS XKX:XK YEM:YE ZAF:ZA ZMB:ZM ZWE:ZW"
+    local region=$(echo " $supported " | grep -Eo " ${region3:-NONE}:[A-Z]{2} " | cut -d: -f2 | tr -d ' ')
+    if [ -n "$region" ]; then
+        echo -n -e "\r Google Gemini:\t\t\t\t${Font_Green}Yes (Region: ${region})${Font_Suffix}\n"
+        return
+    fi
+    if [[ "$tmpresult" == *"45631641,null,true"* ]] || [[ "$tmpresult" == *"45617354,null,true"* ]]; then
+        echo -n -e "\r Google Gemini:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
+        return
+    fi
+    if [ -n "$region3" ]; then
+        echo -n -e "\r Google Gemini:\t\t\t\t${Font_Red}No  (Region: ${region3})${Font_Suffix}\n"
+        return
+    fi
+    echo -n -e "\r Google Gemini:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
+}
+
 function MediaUnlockTest_NHKPlus() {
     local result=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} -fsSL --max-time 10 "https://location-plus.nhk.jp/geoip/area.json" 2>&1)
     if [[ "$result" == "curl"* ]]; then
@@ -3830,6 +3975,126 @@ function MediaUnlockTest_Wikipedia_Editable(){
     echo -n -e "\r Wikipedia Editability:\t\t\t${Font_Red}No${Font_Suffix}\n"
 }
 
+function MediaUnlockTest_BingSearch() {
+    # A cookie jar is needed: bing.com first redirects to /?brdr=1 and expects the cookie back.
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL -b "" --max-time 10 -w '\n%{http_code}' "https://www.bing.com" 2>&1)
+    if [[ "$tmpresult" == "curl"* ]]; then
+        print_network_failure "BingSearch:\t\t\t\t" "$1" "www.bing.com"
+        return
+    fi
+    local httpcode=${tmpresult##*$'\n'}
+    local risky=""
+    if [[ "$tmpresult" == *'sj_cook.set("SRCHHPGUSR","HV"'* ]]; then
+        risky=" [Risky]"
+    fi
+    local region=""
+    if [[ "$httpcode" == "200" ]]; then
+        region=$(echo "$tmpresult" | grep -Eo 'Region:"[^"]*"' | head -n1 | cut -d'"' -f2)
+    fi
+    if [[ "$region" == "CN" || -z "$region" ]] && [[ "$tmpresult" == *"cn.bing.com"* ]]; then
+        echo -n -e "\r BingSearch:\t\t\t\t${Font_Yellow}Only cn.bing.com (Region: CN)${risky}${Font_Suffix}\n"
+        return
+    fi
+    if [ -n "$region" ]; then
+        if [ -n "$risky" ]; then
+            echo -n -e "\r BingSearch:\t\t\t\t${Font_Yellow}Yes (Region: ${region^^})${risky}${Font_Suffix}\n"
+        else
+            echo -n -e "\r BingSearch:\t\t\t\t${Font_Green}Yes (Region: ${region^^})${Font_Suffix}\n"
+        fi
+        return
+    fi
+    if [[ "$httpcode" == "403" ]] || [[ "$httpcode" == "451" ]]; then
+        echo -n -e "\r BingSearch:\t\t\t\t${Font_Red}No  (Banned)${risky}${Font_Suffix}\n"
+        return
+    fi
+    echo -n -e "\r BingSearch:\t\t\t\t${Font_Red}Failed (Unexpected Result: ${httpcode})${Font_Suffix}\n"
+}
+
+function MediaUnlockTest_Reddit() {
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS --max-time 10 -w '\n%{http_code}' "https://www.reddit.com/" 2>&1)
+    if [[ "$tmpresult" == "curl"* ]]; then
+        print_network_failure "Reddit:\t\t\t\t" "$1" "www.reddit.com"
+        return
+    fi
+    local httpcode=${tmpresult##*$'\n'}
+    if [[ "$httpcode" == "429" ]]; then
+        echo -n -e "\r Reddit:\t\t\t\t${Font_Yellow}Rate Limited${Font_Suffix}\n"
+        return
+    fi
+    if [[ "$httpcode" == "200" ]] || [[ "$httpcode" == "302" ]]; then
+        echo -n -e "\r Reddit:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
+        return
+    fi
+    if [[ "$httpcode" == "403" ]] && [[ "$tmpresult" == *"been blocked"* ]]; then
+        echo -n -e "\r Reddit:\t\t\t\t${Font_Red}No  (Blocked)${Font_Suffix}\n"
+        return
+    fi
+    echo -n -e "\r Reddit:\t\t\t\t${Font_Red}Failed (Unexpected Result: ${httpcode})${Font_Suffix}\n"
+}
+
+function MediaUnlockTest_X() {
+    local trace=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS --max-time 10 -w '\n%{http_code}' "https://x.com/cdn-cgi/trace" 2>&1)
+    if [[ "$trace" == "curl"* ]]; then
+        print_network_failure "X (formerly Twitter):\t\t\t" "$1" "x.com"
+        return
+    fi
+    local tracecode=${trace##*$'\n'}
+    local region=$(echo "$trace" | grep '^loc=' | cut -d= -f2 | tr -d '\r')
+    if [[ "$tracecode" == "429" ]]; then
+        echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Yellow}Rate Limited${Font_Suffix}\n"
+        return
+    fi
+    if [[ "$tracecode" != "200" ]] || [ -z "$region" ]; then
+        echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Red}Failed (Unknown Region)${Font_Suffix}\n"
+        return
+    fi
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS --max-time 10 -w '\n%{http_code}' "https://x.com/" 2>&1)
+    if [[ "$tmpresult" == "curl"* ]]; then
+        print_network_failure "X (formerly Twitter):\t\t\t" "$1" "x.com"
+        return
+    fi
+    local httpcode=${tmpresult##*$'\n'}
+    if [[ "$httpcode" == "429" ]]; then
+        echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Yellow}Rate Limited (Region: ${region^^})${Font_Suffix}\n"
+        return
+    fi
+    if [[ "$httpcode" == "403" ]] || [[ "$httpcode" == "451" ]] || [[ " CN IR MM KP RU TM " == *" ${region^^} "* ]]; then
+        echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Red}No  (Region: ${region^^})${Font_Suffix}\n"
+        return
+    fi
+    if echo "$tmpresult" | grep -qiE 'attention required|cf-chl|checking your browser|just a moment|access denied|request blocked|unusual traffic'; then
+        echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Red}No  (Banned by WAF)${Font_Suffix}\n"
+        return
+    fi
+    if [[ "$httpcode" -lt 200 ]] || [[ "$httpcode" -ge 400 ]]; then
+        echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Red}Failed (Unexpected Result: ${httpcode})${Font_Suffix}\n"
+        return
+    fi
+    if [[ "$region" == "T1" ]]; then
+        region="Tor"
+    fi
+    echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Green}Yes (Region: ${region^^})${Font_Suffix}\n"
+}
+
+function MediaUnlockTest_Apple() {
+    local region=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS --max-time 10 "https://gspe1-ssl.ls.apple.com/pep/gcc" 2>&1)
+    if [[ "$region" == "curl"* ]]; then
+        print_network_failure "Apple:\t\t\t\t\t" "$1" "gspe1-ssl.ls.apple.com"
+        return
+    fi
+    region=$(echo "$region" | tr -d '[:space:]')
+    if ! [[ "$region" =~ ^[A-Za-z]{2}$ ]]; then
+        echo -n -e "\r Apple:\t\t\t\t\t${Font_Red}Failed (Unexpected Result)${Font_Suffix}\n"
+        return
+    fi
+    local supported=" AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IS IT JE JM JO JP KE KG KH KI KM KN KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS XK YE YT ZA ZM ZW "
+    if [[ "$supported" == *" ${region^^} "* ]]; then
+        echo -n -e "\r Apple:\t\t\t\t\t${Font_Green}Yes (Region: ${region^^})${Font_Suffix}\n"
+        return
+    fi
+    echo -n -e "\r Apple:\t\t\t\t\t${Font_Red}No  (Region: ${region^^})${Font_Suffix}\n"
+}
+
 
 function echo_Result() {
     for((i=0;i<${#array[@]};i++))
@@ -4114,10 +4379,16 @@ function Global_UnlockTest() {
         MediaUnlockTest_YouTube_CDN ${1} &
         MediaUnlockTest_NetflixCDN ${1} &
         MediaUnlockTest_Wikipedia_Editable ${1} &
+        MediaUnlockTest_BingSearch ${1} &
+        MediaUnlockTest_Reddit ${1} &
+        MediaUnlockTest_X ${1} &
+        MediaUnlockTest_Apple ${1} &
         MediaUnlockTest_Spotify ${1} &
         # MediaUnlockTest_Instagram.Music ${1}
         GameTest_Steam ${1} &
         MediaUnlockTest_Google ${1} &
+        MediaUnlockTest_GooglePlayStore ${1} &
+        MediaUnlockTest_GoogleGemini ${1} &
         MediaUnlockTest_Tiktok ${1} &
         MediaUnlockTest_BilibiliAnimeNew ${1} &
         )
@@ -4135,15 +4406,21 @@ function Global_UnlockTest() {
         MediaUnlockTest_YouTube_CDN ${1} &
         MediaUnlockTest_NetflixCDN ${1} &
         # MediaUnlockTest_Wikipedia_Editable ${1} &
+        MediaUnlockTest_BingSearch ${1} &
+        MediaUnlockTest_Reddit ${1} &
+        MediaUnlockTest_X ${1} &
+        MediaUnlockTest_Apple ${1} &
         MediaUnlockTest_Spotify ${1} &
         # MediaUnlockTest_Instagram.Music ${1}
         # GameTes t_Steam ${1} &
         MediaUnlockTest_Google ${1} &
+        MediaUnlockTest_GooglePlayStore ${1} &
+        MediaUnlockTest_GoogleGemini ${1} &
         MediaUnlockTest_BilibiliAnimeNew ${1} &
         )
     fi
     wait
-    local array=("Dazn:" "HotStar:" "Disney+:" "Netflix:" "YouTube Premium:" "Amazon Prime Video:" "TVBAnywhere+:" "iQyi Oversea:" "Bilibili Anime:" "Viu.com:" "Tiktok" "YouTube CDN:" "Google" "YouTube Region:" "Netflix Preferred CDN:" "Wikipedia" "Spotify" "Steam Currency:" "Instagram")
+    local array=("Dazn:" "HotStar:" "Disney+:" "Netflix:" "YouTube Premium:" "Amazon Prime Video:" "TVBAnywhere+:" "iQyi Oversea:" "Bilibili Anime:" "Viu.com:" "Tiktok" "YouTube CDN:" "Google Location:" "Google Play Store:" "Google Gemini:" "YouTube Region:" "Netflix Preferred CDN:" "Wikipedia" "BingSearch:" "Reddit:" "X (formerly Twitter):" "Apple:" "Spotify" "Steam Currency:" "Instagram")
     echo_Result ${result} ${array}
     echo "======================================="
 }
