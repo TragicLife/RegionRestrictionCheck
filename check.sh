@@ -1990,7 +1990,7 @@ function MediaUnlockTest_FranceTV() {
         echo -n -e "\r France.tv:\t\t\t\t${Font_Green}Yes (Region: $region)${Font_Suffix}\n"
         return
     else
-        echo -n -e "\r France.tv:\t\t\t\t${Font_Red}No   (Region: $region)${Font_Suffix}\n"
+        echo -n -e "\r France.tv:\t\t\t\t${Font_Red}No  (Region: $region)${Font_Suffix}\n"
         return
     fi
 
