@@ -63,7 +63,7 @@ This script was modified based on [CoiaPrant/MediaUnlock_Test](https://github.co
 
 ## How to use
 
-**Make sure you have curl and python installed**
+**Make sure you have curl and jq installed**
 
 **General Use**
 ````bash

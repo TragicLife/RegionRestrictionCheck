@@ -145,6 +145,26 @@ install_nali &
 
 wait
 
+if ! command -v jq &>/dev/null; then
+    echo -e "${Font_Red}jq is required but could not be installed automatically, please install jq and try again.${Font_Suffix}" >&2
+    exit 1
+fi
+
+# Run a jq filter on stdin. Non-JSON responses (HTML error pages, empty body)
+# give empty output and a non-zero status instead of printing jq parse errors.
+# Set DEBUG=1 to see which check received what.
+json_query() {
+    local input output
+    input=$(cat)
+    if ! output=$(printf '%s' "$input" | jq "$@" 2>/dev/null); then
+        if [ -n "$DEBUG" ]; then
+            echo "[${FUNCNAME[1]:-main}] jq '$*': response is not valid JSON: $(printf '%s' "$input" | head -c 200 | tr -d '\n')" >&2
+        fi
+        return 1
+    fi
+    printf '%s\n' "$output"
+}
+
 echo "$myip4"
 echo "$myip6"
 
@@ -169,9 +189,9 @@ function ip_check_ipinfo() {
         echo -n -e "\r ipinfo:\t\t\t${Font_Red}Failed (Network Connection)${Font_Suffix}\n"
         return
     fi
-    local result=$(echo "$tmp" | jq ".country" | tr -d '"')
-    local result_city=$(echo "$tmp" | jq ".city" | tr -d '"')
-    local result_region=$(echo "$tmp" | jq ".region" | tr -d '"')
+    local result=$(echo "$tmp" | json_query ".country" | tr -d '"')
+    local result_city=$(echo "$tmp" | json_query ".city" | tr -d '"')
+    local result_region=$(echo "$tmp" | json_query ".region" | tr -d '"')
     if [ "$result_city" == "null" ] && [ "$result_region" == "null" ]; then
         echo -n -e "\r ipinfo:\t\t\t${Font_Yellow}${result}${Font_Suffix}\n"
         return
@@ -186,15 +206,15 @@ function ip_check_ipapico() {
         echo -n -e "\r ipapi.co:\t\t\t${Font_Red}Failed (Network Connection)${Font_Suffix}\n"
         return
     fi
-    local error=$(echo "$tmp" | jq ".error" | tr -d '"')
+    local error=$(echo "$tmp" | json_query ".error" | tr -d '"')
     if [[ "$error" == "true" ]]; then
-        local error_reason=$(echo "$tmp" | jq ".reason" | tr -d '"')
+        local error_reason=$(echo "$tmp" | json_query ".reason" | tr -d '"')
         echo -n -e "\r ipapi.co:\t\t\t${Font_Red}Failed ($error_reason)${Font_Suffix}\n"
         return
     fi
-    local result=$(echo "$tmp" | jq ".country" | tr -d '"')
-    local result_city=$(echo "$tmp" | jq ".city" | tr -d '"')
-    local result_region=$(echo "$tmp" | jq ".region" | tr -d '"')
+    local result=$(echo "$tmp" | json_query ".country" | tr -d '"')
+    local result_city=$(echo "$tmp" | json_query ".city" | tr -d '"')
+    local result_region=$(echo "$tmp" | json_query ".region" | tr -d '"')
     if [ "$result_city" == "null" ] && [ "$result_region" == "null" ]; then
         echo -n -e "\r ipapi.co:\t\t\t${Font_Yellow}${result}${Font_Suffix}\n"
         return
@@ -211,9 +231,9 @@ function ip_check_ip2location() {
         echo -n -e "\r ip2location:\t\t\t${Font_Red}Failed (Network Connection)${Font_Suffix}\n"
         return
     fi
-    local result=$(echo "$tmp" | jq ".country_code" | tr -d '"')
-    local result_city=$(echo "$tmp" | jq ".city_name" | tr -d '"')
-    local result_region=$(echo "$tmp" | jq ".region_name" | tr -d '"')
+    local result=$(echo "$tmp" | json_query ".country_code" | tr -d '"')
+    local result_city=$(echo "$tmp" | json_query ".city_name" | tr -d '"')
+    local result_region=$(echo "$tmp" | json_query ".region_name" | tr -d '"')
     if [ "$result_city" == "null" ] && [ "$result_region" == "null" ]; then
         echo -n -e "\r ip2location:\t\t\t${Font_Yellow}${result}${Font_Suffix}\n"
         return
@@ -228,7 +248,7 @@ function ip_check_ipsb() {
         echo -n -e "\r Maxmind (ip.sb):\t\t${Font_Red}Failed (Network Connection)${Font_Suffix}\n"
         return
     fi
-    local result=$(echo "$tmp" | jq ".country_code" | tr -d '"')
+    local result=$(echo "$tmp" | json_query ".country_code" | tr -d '"')
     echo -n -e "\r Maxmind (ip.sb):\t\t${Font_Yellow}${result}${Font_Suffix}\n"
     return
 }
@@ -239,8 +259,8 @@ function ip_check_cloudflare() {
         echo -n -e "\r Maxmind (Cloudflare):\t\t${Font_Red}Failed (Network Connection)${Font_Suffix}\n"
         return
     fi
-    local result=$(echo "$tmp" | jq ".country" | tr -d '"')
-    local result_colo=$(echo "$tmp" | jq ".colo" | tr -d '"')
+    local result=$(echo "$tmp" | json_query ".country" | tr -d '"')
+    local result_colo=$(echo "$tmp" | json_query ".colo" | tr -d '"')
     echo -n -e "\r Maxmind (Cloudflare):\t\t${Font_Yellow}${result} (Colo: $result_colo)${Font_Suffix}\n"
     return
 }
@@ -255,7 +275,7 @@ function ip_check_google() {
         echo -n -e "\r Google:\t\t\t${Font_Red}Failed (Unusual Traffic)${Font_Suffix}\n"
         return
     fi
-    local result="$(echo "${tmp}" | grep "location_address" | jq ".BottomSheetParams.payload.bottom_sheet_params.location_address" | tr -d '"')"
+    local result="$(echo "${tmp}" | grep "location_address" | json_query ".BottomSheetParams.payload.bottom_sheet_params.location_address" | tr -d '"')"
     echo -n -e "\r Google:\t\t\t${Font_Yellow}$result${Font_Suffix}\n"
     return
 }
@@ -270,9 +290,9 @@ function ip_check_ipapicom() {
         echo -n -e "\r ip-api.com:\t\t\t${Font_Red}Failed (Network Connection)${Font_Suffix}\n"
         return
     fi
-    local result=$(echo "$tmp" | jq ".countryCode" | tr -d '"')
-    local result_city=$(echo "$tmp" | jq ".city" | tr -d '"')
-    local result_region=$(echo "$tmp" | jq ".regionName" | tr -d '"')
+    local result=$(echo "$tmp" | json_query ".countryCode" | tr -d '"')
+    local result_city=$(echo "$tmp" | json_query ".city" | tr -d '"')
+    local result_region=$(echo "$tmp" | json_query ".regionName" | tr -d '"')
     if [ "$result_city" == "null" ] && [ "$result_region" == "null" ]; then
         echo -n -e "\r ip-api.com:\t\t\t${Font_Yellow}${result}${Font_Suffix}\n"
         return
@@ -287,9 +307,9 @@ function ip_check_ipregistry() {
         echo -n -e "\r ipregistry:\t\t\t${Font_Red}Failed (Network Connection)${Font_Suffix}\n"
         return
     fi
-    local result=$(echo "$tmp" | jq ".location.country.code" | tr -d '"')
-    local result_city=$(echo "$tmp" | jq ".location.city" | tr -d '"')
-    local result_region=$(echo "$tmp" | jq ".location.region.name" | tr -d '"')
+    local result=$(echo "$tmp" | json_query ".location.country.code" | tr -d '"')
+    local result_city=$(echo "$tmp" | json_query ".location.city" | tr -d '"')
+    local result_region=$(echo "$tmp" | json_query ".location.region.name" | tr -d '"')
     if [ "$result_city" == "null" ] && [ "$result_region" == "null" ]; then
         echo -n -e "\r ipregistry:\t\t\t${Font_Yellow}${result}${Font_Suffix}\n"
         return
@@ -304,15 +324,15 @@ function ip_check_tencentmap() {
         echo -n -e "\r Tencent Map:\t\t\t${Font_Red}Failed (Network Connection)${Font_Suffix}\n"
         return
     fi
-    local error=$(echo "$tmp" | jq ".status" | tr -d '"')
+    local error=$(echo "$tmp" | json_query ".status" | tr -d '"')
     if [[ ! "$error" == "0" ]]; then
-        local error_reason=$(echo "$tmp" | jq ".message" | tr -d '"')
+        local error_reason=$(echo "$tmp" | json_query ".message" | tr -d '"')
         echo -n -e "\r Tencent Map:\t\t\t${Font_Red}Failed ($error_reason)${Font_Suffix}\n"
         return
     fi
-    local result=$(echo "$tmp" | jq ".result.ad_info.nation" | tr -d '"')
-    local result_city=$(echo "$tmp" | jq ".result.ad_info.province" | tr -d '"')
-    local result_region=$(echo "$tmp" | jq ".result.ad_info.city" | tr -d '"')
+    local result=$(echo "$tmp" | json_query ".result.ad_info.nation" | tr -d '"')
+    local result_city=$(echo "$tmp" | json_query ".result.ad_info.province" | tr -d '"')
+    local result_region=$(echo "$tmp" | json_query ".result.ad_info.city" | tr -d '"')
     echo -n -e "\r Tencent Map:\t\t\t${Font_Yellow}${result} $result_city $result_region${Font_Suffix}\n"
     return
 }
@@ -332,15 +352,15 @@ function ip_check_ripe() {
         echo -n -e "\r RIPE:\t\t\t\t${Font_Red}Failed (Network Connection)${Font_Suffix}\n"
         return
     fi
-    local result_rir=$(echo "$tmp_rir" | jq ".data.located_resources[0].location" | tr -d '"')
-    local result_rir_inetnum=$(echo "$tmp_rir" | jq ".data.located_resources[0].resource" | tr -d '"')
-    local result_whois=$(echo "$tmp_whois" | jq '.data.records[0][]' -c | grep "country" | head -1 | jq ".value" | tr -d '"')
-    local result_whois_inetnum=$(echo "$tmp_whois" | jq '.data.records[0][]' -c | grep  -E "inetnum|inet6num" | jq ".value" | tr -d '"')
-    local result_maxmind=$(echo "$tmp_maxmind" | jq ".data.located_resources[0].locations[0].country" | tr -d '"')
+    local result_rir=$(echo "$tmp_rir" | json_query ".data.located_resources[0].location" | tr -d '"')
+    local result_rir_inetnum=$(echo "$tmp_rir" | json_query ".data.located_resources[0].resource" | tr -d '"')
+    local result_whois=$(echo "$tmp_whois" | json_query '.data.records[0][]' -c | grep "country" | head -1 | json_query ".value" | tr -d '"')
+    local result_whois_inetnum=$(echo "$tmp_whois" | json_query '.data.records[0][]' -c | grep  -E "inetnum|inet6num" | json_query ".value" | tr -d '"')
+    local result_maxmind=$(echo "$tmp_maxmind" | json_query ".data.located_resources[0].locations[0].country" | tr -d '"')
     if [[ "$result_maxmind" == "?" ]];then
         local result_maxmind_city="Anycast"
     else
-        local result_maxmind_city=$(echo "$tmp_maxmind" | jq ".data.located_resources[0].locations[0].city" | tr -d '"')
+        local result_maxmind_city=$(echo "$tmp_maxmind" | json_query ".data.located_resources[0].locations[0].city" | tr -d '"')
     fi
     echo -n -e "\r RIR (RIPE):\t\t\t${Font_Yellow}${result_rir} ($result_rir_inetnum)${Font_Suffix}\n"
     if [[ -n "$result_whois" ]];then
@@ -366,8 +386,8 @@ function ip_check_cz88() {
         echo -n -e "\r CZ88:\t\t\t\t${Font_Red}Failed (Network Connection)${Font_Suffix}\n"
         return
     fi
-    local result=$(echo "$tmp" | jq ".data.countryCode" | tr -d '"')
-    local result_full=$(echo "$tmp" | jq ".data.actionAddress[0]" | tr -d '"')
+    local result=$(echo "$tmp" | json_query ".data.countryCode" | tr -d '"')
+    local result_full=$(echo "$tmp" | json_query ".data.actionAddress[0]" | tr -d '"')
     echo -n -e "\r CZ88:\t\t\t\t${Font_Yellow}${result} ($result_full)${Font_Suffix}\n"
     return
 }
@@ -378,7 +398,7 @@ function ip_check_zxnic() {
         echo -n -e "\r ZXNIC:\t\t\t\t${Font_Red}Failed (Network Connection)${Font_Suffix}\n"
         return
     fi
-    local result=$(echo "$tmp" | jq ".data.location" | tr -d '"')
+    local result=$(echo "$tmp" | json_query ".data.location" | tr -d '"')
     echo -n -e "\r ZXNIC:\t\t\t\t${Font_Yellow}${result}${Font_Suffix}\n"
     return
 }
@@ -400,9 +420,9 @@ function ip_check_ipgeolocation() {
         echo -n -e "\r ipGeolocation:\t\t\t${Font_Red}Failed (Network Connection)${Font_Suffix}\n"
         return
     fi
-    local result=$(echo "$tmp" | jq ".country_code2" | tr -d '"')
-    local result_city=$(echo "$tmp" | jq ".city" | tr -d '"')
-    local result_region=$(echo "$tmp" | jq ".state_prov" | tr -d '"')
+    local result=$(echo "$tmp" | json_query ".country_code2" | tr -d '"')
+    local result_city=$(echo "$tmp" | json_query ".city" | tr -d '"')
+    local result_region=$(echo "$tmp" | json_query ".state_prov" | tr -d '"')
     if [ "$result_city" == "null" ] && [ "$result_region" == "null" ]; then
         echo -n -e "\r ipGeolocation:\t\t\t${Font_Yellow}${result}${Font_Suffix}\n"
         return
@@ -417,9 +437,9 @@ function ip_check_akamai() {
         echo -n -e "\r Akamai EdgeScape:\t\t${Font_Red}Failed (Network Connection)${Font_Suffix}\n"
         return
     fi
-    local result=$(echo "$tmp" | jq ".geoInfo.country" | tr -d '"')
-    local result_city=$(echo "$tmp" | jq ".geoInfo.city" | tr -d '"')
-    local result_region=$(echo "$tmp" | jq ".geoInfo.region" | tr -d '"')
+    local result=$(echo "$tmp" | json_query ".geoInfo.country" | tr -d '"')
+    local result_city=$(echo "$tmp" | json_query ".geoInfo.city" | tr -d '"')
+    local result_region=$(echo "$tmp" | json_query ".geoInfo.region" | tr -d '"')
     if [ "$result_city" == "null" ] && [ "$result_region" == "null" ]; then
         echo -n -e "\r Akamai EdgeScape:\t\t${Font_Yellow}${result}${Font_Suffix}\n"
         return
@@ -438,9 +458,9 @@ function ip_check_ipstack() {
         echo -n -e "\r ipstack:\t\t\t${Font_Red}Failed (Network Connection)${Font_Suffix}\n"
         return
     fi
-    local result=$(echo "$tmp" | jq ".country_code" | tr -d '"')
-    local result_city=$(echo "$tmp" | jq ".city" | tr -d '"')
-    local result_region=$(echo "$tmp" | jq ".region_name" | tr -d '"')
+    local result=$(echo "$tmp" | json_query ".country_code" | tr -d '"')
+    local result_city=$(echo "$tmp" | json_query ".city" | tr -d '"')
+    local result_region=$(echo "$tmp" | json_query ".region_name" | tr -d '"')
     if [ "$result_city" == "null" ] && [ "$result_region" == "null" ]; then
         echo -n -e "\r ipstack:\t\t\t${Font_Yellow}${result}${Font_Suffix}\n"
         return
@@ -459,9 +479,9 @@ function ip_check_ipwhoisio() {
         echo -n -e "\r ipwhois.io:\t\t\t${Font_Red}Failed (Network Connection)${Font_Suffix}\n"
         return
     fi
-    local result=$(echo "$tmp" | jq ".country_code" | tr -d '"')
-    local result_city=$(echo "$tmp" | jq ".city" | tr -d '"')
-    local result_region=$(echo "$tmp" | jq ".region" | tr -d '"')
+    local result=$(echo "$tmp" | json_query ".country_code" | tr -d '"')
+    local result_city=$(echo "$tmp" | json_query ".city" | tr -d '"')
+    local result_region=$(echo "$tmp" | json_query ".region" | tr -d '"')
     if [ "$result_city" == "null" ] && [ "$result_region" == "null" ]; then
         echo -n -e "\r ipwhois.io:\t\t\t${Font_Yellow}${result}${Font_Suffix}\n"
         return
@@ -480,9 +500,9 @@ function ip_check_ipdata() {
         echo -n -e "\r ipdata.co:\t\t\t${Font_Red}Failed (Network Connection)${Font_Suffix}\n"
         return
     fi
-    local result=$(echo "$tmp" | jq ".country_code" | tr -d '"')
-    local result_city=$(echo "$tmp" | jq ".city" | tr -d '"')
-    local result_region=$(echo "$tmp" | jq ".region" | tr -d '"')
+    local result=$(echo "$tmp" | json_query ".country_code" | tr -d '"')
+    local result_city=$(echo "$tmp" | json_query ".city" | tr -d '"')
+    local result_region=$(echo "$tmp" | json_query ".region" | tr -d '"')
     if [ "$result_city" == "null" ] && [ "$result_region" == "null" ]; then
         echo -n -e "\r ipdata.co:\t\t\t${Font_Yellow}${result}${Font_Suffix}\n"
         return
@@ -498,8 +518,8 @@ function isp_check_bgptools() {
         echo -n -e "\r AS (bgp.tools):\t\t${Font_Red}Failed (Network Connection)${Font_Suffix}\n"
         return
     fi
-    local result=$(echo "$tmp" | jq ".ASS" | tr -d '"')
-    local result_asn=$(echo "$tmp" | jq ".ASN" | tr -d '"')
+    local result=$(echo "$tmp" | json_query ".ASS" | tr -d '"')
+    local result_asn=$(echo "$tmp" | json_query ".ASN" | tr -d '"')
     echo -n -e "\r AS (bgp.tools):\t\t${Font_Yellow}${result} (AS$result_asn)${Font_Suffix}\n"
     return
 }
@@ -518,11 +538,11 @@ function isp_check_ipinfo() {
         echo -n -e "\r Ipinfo:\t\t\t${Font_Red}Failed (429)${Font_Suffix}\n"
         return
     fi
-    local result_asn=$(echo "$tmp" | jq ".data.asn.asn" | tr -d '"')
-    local result_asn_name=$(echo "$tmp" | jq ".data.asn.name" | tr -d '"')
-    local result_asn_type=$(echo "$tmp" | jq ".data.asn.type" | tr -d '"')
-    local result_company=$(echo "$tmp" | jq ".data.company.name" | tr -d '"')
-    local result_company_type=$(echo "$tmp" | jq ".data.company.type" | tr -d '"')
+    local result_asn=$(echo "$tmp" | json_query ".data.asn.asn" | tr -d '"')
+    local result_asn_name=$(echo "$tmp" | json_query ".data.asn.name" | tr -d '"')
+    local result_asn_type=$(echo "$tmp" | json_query ".data.asn.type" | tr -d '"')
+    local result_company=$(echo "$tmp" | json_query ".data.company.name" | tr -d '"')
+    local result_company_type=$(echo "$tmp" | json_query ".data.company.type" | tr -d '"')
     echo -n -e "\r AS (Ipinfo):\t\t\t${Font_Yellow}${result_asn_name} ($result_asn;$result_asn_type)${Font_Suffix}\n"
     echo -n -e "\r Company (Ipinfo):\t\t${Font_Yellow}${result_company} ($result_company_type)${Font_Suffix}\n"
     return
@@ -534,11 +554,11 @@ function isp_check_ipregistry() {
         echo -n -e "\r ipregistry:\t\t\t${Font_Red}Failed (Network Connection)${Font_Suffix}\n"
         return
     fi
-    local result_asn=$(echo "$tmp" | jq ".connection.asn" | tr -d '"')
-    local result_asn_name=$(echo "$tmp" | jq ".connection.organization" | tr -d '"')
-    local result_asn_type=$(echo "$tmp" | jq ".connection.type" | tr -d '"')
-    local result_company=$(echo "$tmp" | jq ".company.name" | tr -d '"')
-    local result_company_type=$(echo "$tmp" | jq ".company.type" | tr -d '"')
+    local result_asn=$(echo "$tmp" | json_query ".connection.asn" | tr -d '"')
+    local result_asn_name=$(echo "$tmp" | json_query ".connection.organization" | tr -d '"')
+    local result_asn_type=$(echo "$tmp" | json_query ".connection.type" | tr -d '"')
+    local result_company=$(echo "$tmp" | json_query ".company.name" | tr -d '"')
+    local result_company_type=$(echo "$tmp" | json_query ".company.type" | tr -d '"')
     echo -n -e "\r AS (ipregistry):\t\t${Font_Yellow}${result_asn_name} (AS$result_asn;$result_asn_type)${Font_Suffix}\n"
     echo -n -e "\r Company (ipregistry):\t\t${Font_Yellow}${result_company} ($result_company_type)${Font_Suffix}\n"
     return
@@ -553,11 +573,11 @@ function isp_check_ipdata() {
         echo -n -e "\r ipdata.co:\t\t\t${Font_Red}Failed (Network Connection)${Font_Suffix}\n"
         return
     fi
-    local result_asn=$(echo "$tmp" | jq ".asn.asn" | tr -d '"')
-    local result_asn_name=$(echo "$tmp" | jq ".asn.name" | tr -d '"')
-    local result_asn_type=$(echo "$tmp" | jq ".asn.type" | tr -d '"')
-    local result_company=$(echo "$tmp" | jq ".company.name" | tr -d '"')
-    local result_company_type=$(echo "$tmp" | jq ".company.type" | tr -d '"')
+    local result_asn=$(echo "$tmp" | json_query ".asn.asn" | tr -d '"')
+    local result_asn_name=$(echo "$tmp" | json_query ".asn.name" | tr -d '"')
+    local result_asn_type=$(echo "$tmp" | json_query ".asn.type" | tr -d '"')
+    local result_company=$(echo "$tmp" | json_query ".company.name" | tr -d '"')
+    local result_company_type=$(echo "$tmp" | json_query ".company.type" | tr -d '"')
     echo -n -e "\r AS (ipdata.co):\t\t${Font_Yellow}${result_asn_name} ($result_asn;$result_asn_type)${Font_Suffix}\n"
     echo -n -e "\r Company (ipdata.co):\t\t${Font_Yellow}${result_company} ($result_company_type)${Font_Suffix}\n"
     return
@@ -675,7 +695,7 @@ function ScriptTitle() {
     echo ""
     echo -e "${Font_Green}项目地址${Font_Suffix} ${Font_Yellow}https://github.com/1-stream/RegionRestrictionCheck ${Font_Suffix}"
     echo -e "${Font_Green}[商家]TG群组${Font_Suffix} ${Font_Yellow}https://t.me/streamunblock1 ${Font_Suffix}"
-    # echo -e "${Font_Purple}脚本适配OS: IDK${Font_Suffix}"
+    # echo -e "${Font_Purple}Supported OS: IDK${Font_Suffix}"
     echo ""
     echo -e " ** 测试时间: $(date '+%Y-%m-%d %H:%M:%S %Z')"
     echo ""
@@ -694,7 +714,7 @@ Start
 function Goodbye() {
     echo -e "${Font_Green}本次测试已结束，感谢使用此脚本 ${Font_Suffix}"
     echo -e ""
-    # echo -e "${Font_Yellow}检测脚本当天运行次数: ${TodayRunTimes}; 共计运行次数: ${TotalRunTimes} ${Font_Suffix}"
+    # echo -e "${Font_Yellow}Script runs today: ${TodayRunTimes}; total runs: ${TotalRunTimes} ${Font_Suffix}"
 }
 
 function RunScript() {
