@@ -1005,21 +1005,42 @@ function MediaUnlockTest_Viu.com() {
 }
 
 function MediaUnlockTest_Niconico() {
-    local result=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSI -X GET "https://www.nicovideo.jp/watch/so23017073" --write-out %{http_code} --output /dev/null 2>&1)
-    if [[ "$result" == "curl"* ]]; then
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 -w '\n%{http_code}' "https://www.nicovideo.jp/watch/so40278367" 2>&1)
+    if [[ "$tmpresult" == "curl"* ]]; then
         print_network_failure "Niconico:\t\t\t\t" "$1" "www.nicovideo.jp"
         return
     fi
-    if [[ "$result" == "400" ]]; then
+    local httpcode=${tmpresult##*$'\n'}
+    if [[ "$tmpresult" == *"同じ地域"* ]] || [[ "$httpcode" == "400" ]] || [[ "$httpcode" == "403" ]] || [[ "$httpcode" == "451" ]]; then
         echo -n -e "\r Niconico:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
         return
-    elif [[ "$result" == "200" ]]; then
-        echo -n -e "\r Niconico:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
+    fi
+    if [[ "$httpcode" != "200" ]]; then
+        echo -n -e "\r Niconico:\t\t\t\t${Font_Red}Failed (Unexpected Result: ${httpcode})${Font_Suffix}\n"
         return
-    else
-        echo -n -e "\r Niconico:\t\t\t\t${Font_Red}Failed ($result)${Font_Suffix}\n"
     fi
 
+    # Video is watchable; check official live by picking a free, already-ended official anime episode from the live top page.
+    local livepage=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 -H 'accept-language: en-US,en;q=0.9' "https://live.nicovideo.jp/?cmnhd_ref=device=pc&site=nicolive&pos=header_servicelink&ref=WatchPage-Anchor" 2>&1)
+    if [[ "$livepage" == "curl"* ]]; then
+        print_network_failure "Niconico:\t\t\t\t" "$1" "live.nicovideo.jp" " [2]"
+        return
+    fi
+    local liveid=$(echo "$livepage" | sed 's/&quot;/"/g' | awk '{gsub(/\{"type":"seed"/, "\n&"); print}' | grep '^{"type":"seed"' | grep '"providerType":"official"' | grep '"payment":false' | grep '"isFollowerOnly":false' | grep -v '"status":"ON_AIR"' | grep '話' | head -n1 | grep -Eo '"nicoliveProgramId":"lv[0-9]+"' | head -n1 | cut -d'"' -f4)
+    if [ -z "$liveid" ]; then
+        echo -n -e "\r Niconico:\t\t\t\t${Font_Yellow}Yes (Official Live Unknown)${Font_Suffix}\n"
+        return
+    fi
+    local livewatch=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 -H 'accept-language: en-US,en;q=0.9' "https://live.nicovideo.jp/watch/${liveid}" 2>&1)
+    if [[ "$livewatch" == "curl"* ]]; then
+        print_network_failure "Niconico:\t\t\t\t" "$1" "live.nicovideo.jp" " [3]"
+        return
+    fi
+    if [[ "$livewatch" == *"notAllowedCountry"* ]] || [[ "$livewatch" == *'isCountryRestrictionTarget&quot;:true'* ]] || [[ "$livewatch" == *'"isCountryRestrictionTarget":true'* ]]; then
+        echo -n -e "\r Niconico:\t\t\t\t${Font_Yellow}Yes (Official Live Unavailable)${Font_Suffix}\n"
+        return
+    fi
+    echo -n -e "\r Niconico:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
 }
 
 function MediaUnlockTest_MGStage() {
@@ -3962,18 +3983,25 @@ function MediaUnlockTest_beIN_Sports() {
 }
 
 function MediaUnlockTest_Wikipedia_Editable(){
-    local tmpresult=$(curl $curlArgs -${1} -s 'https://zh.wikipedia.org/w/index.php?title=Wikipedia%3A%E6%B2%99%E7%9B%92&action=edit' --user-agent "${UA_Browser}")
-    if [ -z "$tmpresult" ]; then
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS --max-time 10 -w '\n%{http_code}' 'https://zh.wikipedia.org/w/index.php?title=Wikipedia%3A%E6%B2%99%E7%9B%92&action=edit' 2>&1)
+    if [[ "$tmpresult" == "curl"* ]]; then
         print_network_failure "Wikipedia Editability:\t\t\t" "$1" "zh.wikipedia.org"
         return
     fi
-    local result=$(echo "$tmpresult" | grep -i 'Banned')
-    if [ -z "$result" ]; then
+    local httpcode=${tmpresult##*$'\n'}
+    if [[ "$tmpresult" == *"Banned"* ]]; then
+        echo -n -e "\r Wikipedia Editability:\t\t\t${Font_Red}No${Font_Suffix}\n"
+        return
+    fi
+    if [[ "$httpcode" == "200" ]]; then
         echo -n -e "\r Wikipedia Editability:\t\t\t${Font_Green}Yes${Font_Suffix}\n"
         return
     fi
-
-    echo -n -e "\r Wikipedia Editability:\t\t\t${Font_Red}No${Font_Suffix}\n"
+    if [[ "$httpcode" == "429" ]]; then
+        echo -n -e "\r Wikipedia Editability:\t\t\t${Font_Yellow}Rate Limited${Font_Suffix}\n"
+        return
+    fi
+    echo -n -e "\r Wikipedia Editability:\t\t\t${Font_Red}Failed (Unexpected Result: ${httpcode})${Font_Suffix}\n"
 }
 
 function MediaUnlockTest_BingSearch() {
