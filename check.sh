@@ -561,7 +561,7 @@ function MediaUnlockTest_DisneyPlus() {
     local is403=$(echo $TokenContent | grep '403 ERROR')
 
     if [ -n "$isBanned" ] || [ -n "$is403" ]; then
-        echo -n -e "\r Disney+:\t\t\t\t${Font_Red}No (Banned)${Font_Suffix}\n"
+        echo -n -e "\r Disney+:\t\t\t\t${Font_Red}No  (Banned)${Font_Suffix}\n"
         return
     fi
 
@@ -590,13 +590,13 @@ function MediaUnlockTest_DisneyPlus() {
         echo -n -e "\r Disney+:\t\t\t\t${Font_Yellow}Available For [Disney+ $region] Soon${Font_Suffix}\n"
         return
     elif [ -n "$region" ] && [ -n "$isUnavailable" ]; then
-        echo -n -e "\r Disney+:\t\t\t\t${Font_Red}No (Unavailable)${Font_Suffix}\n"
+        echo -n -e "\r Disney+:\t\t\t\t${Font_Red}No  (Unavailable)${Font_Suffix}\n"
         return
     elif [ -n "$region" ] && [[ "$inSupportedLocation" == "true" ]]; then
         echo -n -e "\r Disney+:\t\t\t\t${Font_Green}Yes (Region: $region)${Font_Suffix}\n"
         return
     elif [ -z "$region" ]; then
-        echo -n -e "\r Disney+:\t\t\t\t${Font_Red}No (Unknown)${Font_Suffix}\n"
+        echo -n -e "\r Disney+:\t\t\t\t${Font_Red}No  (Unknown)${Font_Suffix}\n"
         return
     else
         echo -n -e "\r Disney+:\t\t\t\t${Font_Red}Failed${Font_Suffix}\n"
@@ -613,7 +613,7 @@ function MediaUnlockTest_Dazn() {
         return
     fi
     if [[ "$httpcode" == "403" ]]; then
-        echo -n -e "\r Dazn:\t\t\t\t\t${Font_Red}No (Banned)${Font_Suffix}\n"
+        echo -n -e "\r Dazn:\t\t\t\t\t${Font_Red}No  (Banned)${Font_Suffix}\n"
         return
     fi
     local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS --max-time 10 "https://startup.core.indazn.com/v1/main/web?Platform=web&LandingPageKey=generic&Brand=dazn" 2>&1)
@@ -622,7 +622,7 @@ function MediaUnlockTest_Dazn() {
         return
     fi
     if [[ "$tmpresult" == *"Security policy has been breached"* ]]; then
-        echo -n -e "\r Dazn:\t\t\t\t\t${Font_Red}No (Banned)${Font_Suffix}\n"
+        echo -n -e "\r Dazn:\t\t\t\t\t${Font_Red}No  (Banned)${Font_Suffix}\n"
         return
     fi
     # CloudFront also rejects curl's TLS fingerprint regardless of the IP;
@@ -2919,7 +2919,7 @@ function MediaUnlockTest_Popcornflix(){
     if [[ "$region" == "US" ]]; then
         echo -n -e "\r Popcornflix:\t\t\t\t${Font_Green}Yes (Region: US)${Font_Suffix}\n"
     elif [ -n "$region" ]; then
-        echo -n -e "\r Popcornflix:\t\t\t\t${Font_Red}No (Region: ${region})${Font_Suffix}\n"
+        echo -n -e "\r Popcornflix:\t\t\t\t${Font_Red}No  (Region: ${region})${Font_Suffix}\n"
     else
         echo -n -e "\r Popcornflix:\t\t\t\t${Font_Red}Failed${Font_Suffix}\n"
     fi
@@ -3944,19 +3944,19 @@ function MediaUnlockTest_ChatGPT() {
     local result1=$(echo "$tmpresult" | grep 'location' )
     if [ ! -n "$result1" ]; then
         if [[ "$tmpresult1" == *"blocked_why_headline"* ]]; then
-            echo -n -e "\r ChatGPT:\t\t\t\t${Font_Red}No (Blocked)${Font_Suffix}\n"
+            echo -n -e "\r ChatGPT:\t\t\t\t${Font_Red}No  (Blocked)${Font_Suffix}\n"
             return
         fi
         if [[ "$tmpresult1" == *"unsupported_country_region_territory"* ]]; then
-            echo -n -e "\r ChatGPT:\t\t\t\t${Font_Red}No (Unsupported Region)${Font_Suffix}\n"
+            echo -n -e "\r ChatGPT:\t\t\t\t${Font_Red}No  (Unsupported Region)${Font_Suffix}\n"
             return
         fi
         if [[ "$cf_details" == *"(1)"* ]]; then
-            echo -n -e "\r ChatGPT:\t\t\t\t${Font_Red}No (Disallowed ISP[1])${Font_Suffix}\n"
+            echo -n -e "\r ChatGPT:\t\t\t\t${Font_Red}No  (Disallowed ISP[1])${Font_Suffix}\n"
             return
         fi
         if [[ "$cf_details" == *"(2)"* ]]; then
-            echo -n -e "\r ChatGPT:\t\t\t\t${Font_Red}No (Disallowed ISP[2])${Font_Suffix}\n"
+            echo -n -e "\r ChatGPT:\t\t\t\t${Font_Red}No  (Disallowed ISP[2])${Font_Suffix}\n"
             return
         fi
     	echo -n -e "\r ChatGPT:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
