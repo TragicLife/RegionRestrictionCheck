@@ -1155,7 +1155,7 @@ function MediaUnlockTest_LineTV.TW() {
 function MediaUnlockTest_Viu.com() {
     local tmpresult=$(curl $curlArgs -${1} -sS -o /dev/null -L --max-time 10 -w '%{url_effective}\n' "https://www.viu.com/" 2>&1)
     local banresult=$(curl $curlArgs -${1} -SsL --max-time 10 "https://d3o7oi00quuwqu.cloudfront.net" 2>&1)
-    if [ "$tmpresult" = "000" ] || [[ "$banresult" == "curl"* ]]; then
+    if [[ "$tmpresult" == "curl"* ]] || [[ "$banresult" == "curl"* ]]; then
         print_network_failure "Viu.com:\t\t\t\t" "$1" "www.viu.com"
         return
     fi
