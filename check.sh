@@ -4266,11 +4266,13 @@ function MediaUnlockTest_mora() {
 function MediaUnlockTest_DAnimeStore(){
     # The redirect target decides the result. It can be an HTTP redirect or a meta
     # refresh in the page, so headers (-i) and body of every hop are searched.
+    # The docomo ID host is reached first, and OpenSSL 3 refuses its TLS (legacy
+    # renegotiation), so curl may stop there: it is checked before any curl error.
     local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSLi --max-time 10 'https://animestore.docomo.ne.jp/animestore/reg_pc' 2>&1)
     if [[ "$tmpresult" == *"animestore/CF/overseas_warn"* ]]; then
         echo -n -e "\r D Anime Store:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
         return
-    elif [[ "$tmpresult" == *"cfg.smt.docomo.ne.jp/authx/cgi/baseauth"* ]]; then
+    elif [[ "$tmpresult" == *"id.smt.docomo.ne.jp/cgi8/oidc/authorize"* || "$tmpresult" == *"cfg.smt.docomo.ne.jp/authx/cgi/baseauth"* ]]; then
         echo -n -e "\r D Anime Store:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
         return
     elif [[ -z "$tmpresult" || "$tmpresult" == *"curl: ("* ]]; then
