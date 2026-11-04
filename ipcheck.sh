@@ -91,16 +91,18 @@ checkDependencies() {
         ssll="-k --ciphers DEFAULT@SECLEVEL=1"
     fi
     
-    if [ "$(which apt 2>/dev/null)" ]; then
+    # Termux and macOS first: both have an "apt" command that is not Debian's
+    # (on macOS, /usr/bin/apt is a Java tool).
+    if [[ "$os_version" == "Termux" ]]; then
+        InstallMethod="pkg"
+        elif [[ "$os_version" == "MacOS" ]]; then
+        InstallMethod="brew"
+        elif [ "$(which apt 2>/dev/null)" ]; then
         InstallMethod="apt"
         is_debian=1
         elif [ "$(which dnf 2>/dev/null)" ] || [ "$(which yum 2>/dev/null)" ]; then
         InstallMethod="yum"
         is_redhat=1
-        elif [[ "$os_version" == "Termux" ]]; then
-        InstallMethod="pkg"
-        elif [[ "$os_version" == "MacOS" ]]; then
-        InstallMethod="brew"
     fi
     
     if ! command -v jq &>/dev/null; then
@@ -123,7 +125,7 @@ checkDependencies() {
             $InstallMethod update -y >/dev/null 2>&1
             $InstallMethod install jq -y >/dev/null 2>&1
             
-            elif [ "$is_macos" == 1 ]; then
+            elif [ "$is_macos" == 1 ] && command -v brew &>/dev/null; then
             echo -e "${Font_Green}Installing jq${Font_Suffix}"
             $InstallMethod install jq
         fi
@@ -410,7 +412,9 @@ function ip_check_LeoMoeAPI() {
         local tmp=$(/tmp/nali ${myip4} 2>&1)
     fi
     local result=$(echo "$tmp" | grep -Eo "\[.*\]")
-    echo -n -e "\r LeoMoeAPI:\t\t\t${Font_Yellow}${result:1:-1}${Font_Suffix}\n"
+    result="${result#\[}"
+    result="${result%\]}"
+    echo -n -e "\r LeoMoeAPI:\t\t\t${Font_Yellow}${result}${Font_Suffix}\n"
     return
 }
 

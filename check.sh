@@ -80,9 +80,55 @@ if [ -z "$Dns" ]; then
     dns=""
 fi
 
-if ! mktemp -u --suffix=RRC &>/dev/null; then
-    is_busybox=1
-fi
+# Exercise every grep feature this script relies on. Behaviour is tested rather
+# than guessed from the OS or binary name: BusyBox's grep depends on its build
+# options, macOS ships BSD grep, and either may have been replaced by GNU grep.
+# Keep this in sync when a test starts using another grep feature. In particular
+# stick to POSIX patterns (no -P, \d or \w, no empty alternatives such as "(a|)"),
+# put options before the pattern, since not every grep reorders arguments, and
+# avoid -w with -o: BusyBox 1.37 finds "a=CN" in "xa=CN" after an earlier match.
+# $1: grep command to test
+grep_is_capable() {
+    local bin="$1"
+    command -v "$bin" >/dev/null || return 1
+
+    # -q: exit status only, 1 means "no match" and anything above is an error
+    printf 'ABC\n' | command "$bin" -q 'ABC' || return 1
+    printf 'ABC\n' | command "$bin" -q 'XYZ'
+    [ $? -eq 1 ] || return 1
+    # -i, and -E with alternation, groups and intervals
+    [ "$(printf 'ABC\n' | command "$bin" -i 'abc')" == "ABC" ] || return 1
+    printf 'ABC\n' | command "$bin" -qiE 'xyz|a(b)c' || return 1
+    [ "$(printf 'aa\na\n' | command "$bin" -E '^a{2}$')" == "aa" ] || return 1
+    # -F: metacharacters are literal
+    [ "$(printf 'a.c\nabc\n' | command "$bin" -F 'a.c')" == "a.c" ] || return 1
+    # -o: every match on a line is printed on its own line
+    [ "$(printf 'x=US y=JP\n' | command "$bin" -Eo '=[A-Z]{2}' | tr -d '\n')" == "=US=JP" ] || return 1
+    # Basic regex intervals, and "{" as a plain character in a basic regex
+    [ "$(printf 'x=US\n' | command "$bin" -o '[A-Z]\{2\}')" == "US" ] || return 1
+    [ "$(printf 'k:{a}\n' | command "$bin" -o '{[^}]*}')" == "{a}" ] || return 1
+    # -o with anchors in alternatives, the portable way to match a whole word
+    [ "$(printf 'xa=CN a=US\n' | command "$bin" -oE '(^|[^a-z])a=[A-Z]{2}($|[^A-Z])' | tr -d ' ')" == "a=US" ] || return 1
+} 2>/dev/null
+
+# Use the first capable grep, so a default one that is too limited can be
+# replaced by GNU grep installed under another name. A function, not an alias,
+# so that it also applies inside command substitutions and background jobs.
+checkGrep() {
+    local candidate
+    for candidate in grep ggrep gnugrep; do
+        if grep_is_capable "$candidate"; then
+            if [ "$candidate" != "grep" ]; then
+                eval "grep() { command $candidate \"\$@\"; }"
+            fi
+            return 0
+        fi
+    done
+    echo -e "${Font_Red}The grep on this system lacks features this script needs, please install GNU grep and try again.${Font_Suffix}" >&2
+    exit 1
+}
+checkGrep
+
 curlArgs="$useNIC $usePROXY $xForward $resolve $dns --max-time 10"
 UA_Browser="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36 Edg/112.0.1722.64"
 UA_Dalvik="Dalvik/2.1.0 (Linux; U; Android 9; ALP-AL00 Build/HUAWEIALP-AL00)"
@@ -107,16 +153,18 @@ checkOS() {
         ssll="-k --ciphers DEFAULT@SECLEVEL=1"
     fi
     
-    if [ "$(which apt 2>/dev/null)" ]; then
+    # Termux and macOS first: both have an "apt" command that is not Debian's
+    # (on macOS, /usr/bin/apt is a Java tool).
+    if [[ "$os_version" == "Termux" ]]; then
+        InstallMethod="pkg"
+        elif [[ "$os_version" == "MacOS" ]]; then
+        InstallMethod="brew"
+        elif [ "$(which apt 2>/dev/null)" ]; then
         InstallMethod="apt"
         is_debian=1
         elif [ "$(which dnf 2>/dev/null)" ] || [ "$(which yum 2>/dev/null)" ]; then
         InstallMethod="yum"
         is_redhat=1
-        elif [[ "$os_version" == "Termux" ]]; then
-        InstallMethod="pkg"
-        elif [[ "$os_version" == "MacOS" ]]; then
-        InstallMethod="brew"
     fi
 }
 checkOS
@@ -150,13 +198,13 @@ checkDependencies() {
             echo -e "${Font_Green}Installing jq${Font_Suffix}"
             $InstallMethod update -y >/dev/null 2>&1
             $InstallMethod install jq -y >/dev/null 2>&1
-            elif [ "$is_macos" == 1 ]; then
+            elif [ "$is_macos" == 1 ] && command -v brew &>/dev/null; then
             echo -e "${Font_Green}Installing jq${Font_Suffix}"
             $InstallMethod install jq
         fi
     fi
     
-    if [ "$is_macos" == 1 ]; then
+    if [ "$is_macos" == 1 ] && command -v brew &>/dev/null; then
         if ! command -v md5sum &>/dev/null; then
             echo -e "${Font_Green}Installing md5sha1sum${Font_Suffix}"
             $InstallMethod install md5sha1sum
@@ -184,6 +232,24 @@ json_query() {
         return 1
     fi
     printf '%s\n' "$output"
+}
+
+# Print a string without its first and last characters. Replaces
+# ${var:offset:-n}, which needs bash 4.2 while macOS ships bash 3.2. Prints
+# nothing when the string is too short, e.g. when the value was not found.
+# $1: string, $2: characters to drop from the start, $3: from the end
+trim_chars() {
+    local length=$((${#1} - $2 - $3))
+    if [ "$length" -gt 0 ]; then
+        printf '%s' "${1:$2:$length}"
+    fi
+}
+
+# Print a string in upper case. Replaces ${var^^}, which needs bash 4 while macOS
+# ships bash 3.2. Only ASCII letters are converted, which covers region codes.
+# $1: string
+to_upper() {
+    printf '%s' "$1" | tr 'a-z' 'A-Z'
 }
 
 # Print the first IPv4/IPv6 address of a host using the system resolver.
@@ -346,7 +412,7 @@ ShowRegion() {
 }
 
 function detect_isp() {
-    local lan_ip=$(echo "$1" | grep -Eo "^(10\.[0-9]{1,3}\.[0-9]{1,3}\.((0/([89]|1[0-9]|2[0-9]|3[012]))|([0-9]{1,3})))|(172\.(1[6789]|2\[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}(/(1[6789]|2[0-9]|3[012]))?)|(192\.168\.[0-9]{1,3}\.[0-9]{1,3}(/(1[6789]|2[0-9]|3[012]))?)$")
+    local lan_ip=$(echo "$1" | grep -Eo "^(10\.[0-9]{1,3}\.[0-9]{1,3}\.((0/([89]|1[0-9]|2[0-9]|3[012]))|([0-9]{1,3})))|(172\.(1[6789]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}(/(1[6789]|2[0-9]|3[012]))?)|(192\.168\.[0-9]{1,3}\.[0-9]{1,3}(/(1[6789]|2[0-9]|3[012]))?)$")
     if [ -n "$lan_ip" ]; then
         echo "LAN"
         return
@@ -641,7 +707,7 @@ function MediaUnlockTest_Dazn() {
     local reason=$(echo "$tmpresult" | json_query -r '.Region.disallowedReason // empty')
 
     if [[ "$isAllowed" == "true" ]]; then
-        echo -n -e "\r Dazn:\t\t\t\t\t${Font_Green}Yes (Region: ${region^^})${Font_Suffix}\n"
+        echo -n -e "\r Dazn:\t\t\t\t\t${Font_Green}Yes (Region: $(to_upper "$region"))${Font_Suffix}\n"
         return
     elif [[ "$isAllowed" == "false" ]]; then
         if [ -n "$reason" ]; then
@@ -857,10 +923,10 @@ function MediaUnlockTest_SlingTV() {
     local is_restricted=$(echo $tmpresult | json_query .ip_restricted | tr -d '"')
     local region=$(echo $tmpresult | json_query .country | tr -d '"')
     if [[ "$is_restricted" == "true" ]]; then
-        echo -n -e "\r Sling TV:\t\t\t\t${Font_Red}No  (Region: ${region^^})${Font_Suffix}\n"
+        echo -n -e "\r Sling TV:\t\t\t\t${Font_Red}No  (Region: $(to_upper "$region"))${Font_Suffix}\n"
         return
     else
-        echo -n -e "\r Sling TV:\t\t\t\t${Font_Green}Yes (Region: ${region^^})${Font_Suffix}\n"
+        echo -n -e "\r Sling TV:\t\t\t\t${Font_Green}Yes (Region: $(to_upper "$region"))${Font_Suffix}\n"
         return
     fi
 }
@@ -900,7 +966,7 @@ function MediaUnlockTest_HBOMax() {
     local homeMarket=$(echo $APITemp | json_query .routing.homeMarket | tr -d '"')
     local tmpresult=$(curl $curlArgs -${1} -sS "https://default.$tenant-$homeMarket.$env.$domain/users/me" -H 'x-disco-client: WEB:10.15.7:dotcom-hbomax:7.7.0' -H 'x-disco-params: realm=bolt,bid=beam,features=ar' -b "st=${Token}" 2>&1)
     local result=$(echo $tmpresult | json_query .data.attributes.currentLocationTerritory | tr -d '"')
-    local availableRegion=$(curl $curlArgs -${1} -sSL "https://www.hbomax.com/" 2>&1 | grep -woE '"url":"/[a-z]{2}/[a-z]{2}"' | cut -f4 -d'"' | cut -f2 -d'/' | sort -n | uniq | xargs | tr a-z A-Z)
+    local availableRegion=$(curl $curlArgs -${1} -sSL "https://www.hbomax.com/" 2>&1 | grep -oE '"url":"/[a-z]{2}/[a-z]{2}"' | cut -f4 -d'"' | cut -f2 -d'/' | sort -n | uniq | xargs | tr a-z A-Z)
     local isVPN=$(curl $curlArgs -${1} -sS 'https://default.any-any.prd.api.hbomax.com/any/playback/v1/playbackInfo'  -b 'st=eyJhbGciOiJSUzI1NiJ9.eyJqdGkiOiJ0b2tlbi0wOWQxOTg4Yy1mZmUzLTQxMDEtOWI5My0yNDU1ZTkyNGQ1YjYiLCJpc3MiOiJmcGEtaXNzdWVyIiwic3ViIjoiVVNFUklEOmJvbHQ6YjYzOTgxZWQtNzA2MC00ZGYwLThkZGItZjA2YjFkNWRjZWVkIiwiaWF0IjoxNzQzODQwMzgwLCJleHAiOjIwNTkyMDAzODAsInR5cGUiOiJBQ0NFU1NfVE9LRU4iLCJzdWJkaXZpc2lvbiI6ImJlYW1fYW1lciIsInNjb3BlIjoiZGVmYXVsdCIsImlpZCI6IjQwYTgzZjNlLTY4OTktNDE3Mi1hMWY2LWJjZDVjN2ZkNjA4NSIsInZlcnNpb24iOiJ2MyIsImFub255bW91cyI6ZmFsc2UsImRldmljZUlkIjoiNWY3YzViZjQtYjc4Ny00NDRjLWJhYTYtMzU5MzgwYWFiM2RmIn0.f5HTgIV2v0nQQDp5LQG0xqLrxyACdvnMDiWO_viX_CUGqtc5ncSjp_LgM30QFkkMnINFhzKEGRpsZvb-o3Pj_Z39uRBr5LCeiCPR7ssV-_SXyRFVRRDEB2lpxyz7jmdD1SxvA06HnEwTbZQzlbZ7g9GXq02yNdEfHlqYEh_4WF88UbXfeieYTd4TH7kwN1RE50NfQUS6f0WmzpAbpiULyd87mpTeynchFNMMz-YHVzZ_-nDW6geihXc3tS0FKVSR8fdOSPQFzEYOLCfhInufiPahiXI-OKF89aShAqM-y4Hx_eukGnsq3mO5wa3unnqVr9Kzc61BIhHh1Hs2bqYiYg;' -H 'x-disco-client: WEB:10.15.7:dotcom-hbomax:7.7.0' -H 'x-disco-params: realm=bolt,bid=beam,features=ar'  2>&1 )
     # Token may expire.
     if [[ "$availableRegion" == *"$result"* ]] && [ -n "$result" ]; then
@@ -967,15 +1033,15 @@ function MediaUnlockTest_iQYI_Region() {
     result=$(echo "$tmpresult" | grep 'mod=' | awk '{print $2}' | cut -f2 -d'=' | cut -f1 -d';')
     region=$(echo "$tmpresult" | grep 'x-custom-client-ip:' | cut -f3 -d':' | sed 's/.$//')
     if [[ "$region" == "cn" ]]; then
-            echo -n -e "\r iQyi Oversea:\t\t\t\t${Font_Yellow}Mainland (Region: ${region^^})${Font_Suffix}\n"
+            echo -n -e "\r iQyi Oversea:\t\t\t\t${Font_Yellow}Mainland (Region: $(to_upper "$region"))${Font_Suffix}\n"
             return
     fi
     if [ -n "$result" ]; then
         if [[ "$result" == "intl" ]]; then
-            echo -n -e "\r iQyi Oversea:\t\t\t\t${Font_Red}No  (Region: ${region^^})${Font_Suffix}\n"
+            echo -n -e "\r iQyi Oversea:\t\t\t\t${Font_Red}No  (Region: $(to_upper "$region"))${Font_Suffix}\n"
             return
         else
-            echo -n -e "\r iQyi Oversea:\t\t\t\t${Font_Green}Yes (Region: ${region^^})${Font_Suffix}\n"
+            echo -n -e "\r iQyi Oversea:\t\t\t\t${Font_Green}Yes (Region: $(to_upper "$region"))${Font_Suffix}\n"
             return
         fi
     else
@@ -1156,7 +1222,7 @@ function MediaUnlockTest_Niconico() {
     fi
     local regiontext=""
     if [ -n "$region" ]; then
-        regiontext=" (Region: ${region^^})"
+        regiontext=" (Region: $(to_upper "$region"))"
     fi
     if [ "$blocked" == "1" ]; then
         echo -n -e "\r Niconico:\t\t\t\t${Font_Red}No${regiontext}${Font_Suffix}\n"
@@ -1199,7 +1265,7 @@ function MediaUnlockTest_ParamountPlus() {
             echo -n -e "\r Paramount+:\t\t\t\t${Font_Green}Yes (Region: US)${Font_Suffix}\n"
             return
         else
-            echo -n -e "\r Paramount+:\t\t\t\t${Font_Green}Yes (Region: ${region^^})${Font_Suffix}\n"
+            echo -n -e "\r Paramount+:\t\t\t\t${Font_Green}Yes (Region: $(to_upper "$region"))${Font_Suffix}\n"
             return
         fi
     else
@@ -1350,7 +1416,7 @@ function MediaUnlockTest_BritBox() {
     local result=$(echo $tmpresult | grep 'locationnotvalidated')
     if [ -n "$result" ]; then
         local region=$(echo $tmpresult | cut -d '/' -f4)
-        echo -n -e "\r BritBox:\t\t\t\t${Font_Red}No  (Region: ${region^^})${Font_Suffix}\n"
+        echo -n -e "\r BritBox:\t\t\t\t${Font_Red}No  (Region: $(to_upper "$region"))${Font_Suffix}\n"
         return
     else
         echo -n -e "\r BritBox:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
@@ -2829,7 +2895,7 @@ function MediaUnlockTest_Spotify() {
     local country=$(echo $tmpresult | grep -Eo 'geoCountry.*","geoCountryMarket"')
 
     if [ -n "$country" ]; then
-        echo -n -e "\r Spotify Region:\t\t\t${Font_Green}${country:13:-20}${Font_Suffix}\n"
+        echo -n -e "\r Spotify Region:\t\t\t${Font_Green}$(trim_chars "$country" 13 20)${Font_Suffix}\n"
         return
     fi
     echo -n -e "\r Spotify Region:\t\t\t${Font_Red}Failed${Font_Suffix}\n"
@@ -2841,8 +2907,8 @@ function MediaUnlockTest_VideoMarket() {
         print_network_failure "VideoMarket:\t\t\t\t" "$1" "www.videomarket.jp"
         return
     fi
-    local Token=$(echo $TokenSrc| grep -Eo 'notLoggedInTokenPc:(.|)*notLoggedInTokenSpAndroid')
-    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --compressed --max-time 10 "https://www.videomarket.jp/graphql" -X POST -H "Content-Type: application/json" -d '{"operationName":"readStatus","variables":{},"query":"query readStatus {\n  readStatus {\n    isRead\n    __typename\n  }\n}\n"}' -H "Authorization:Bearer ${Token:20:-27}"   2>&1)
+    local Token=$(echo $TokenSrc| grep -Eo 'notLoggedInTokenPc:.*notLoggedInTokenSpAndroid')
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --compressed --max-time 10 "https://www.videomarket.jp/graphql" -X POST -H "Content-Type: application/json" -d '{"operationName":"readStatus","variables":{},"query":"query readStatus {\n  readStatus {\n    isRead\n    __typename\n  }\n}\n"}' -H "Authorization:Bearer $(trim_chars "$Token" 20 27)"   2>&1)
     if [[ "$tmpresult" == "curl"* ]]; then
         print_network_failure "VideoMarket:\t\t\t\t" "$1" "www.videomarket.jp"
         return
@@ -3061,7 +3127,7 @@ function MediaUnlockTest_CoupangPlay() {
         print_network_failure "Coupang Play:\t\t\t\t" "$1" "www.coupangplay.com"
         return
     fi
-    local result1=$(echo "$tmpresult" | grep 'Location' -i | awk '{print $2}' )
+    local result1=$(echo "$tmpresult" | grep -i 'Location' | awk '{print $2}' )
     if [[ "$result1" == *"/not-available"* ]]; then
         echo -n -e "\r Coupang Play:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
     else
@@ -3139,7 +3205,7 @@ function MediaUnlockTest_SpotvNow() {
     local result=$(echo $tmpresult | json_query .[0].error_subcode 2>/dev/null | tr -d '"')
     local region=$(echo $tmpresult | json_query .[0].client_geo 2>/dev/null | tr -d '"')
     if [[ "$result" == "CLIENT_GEO" ]]; then
-        echo -n -e "\r SPOTV NOW:\t\t\t\t${Font_Red}No  (Region: ${region^^})${Font_Suffix}\n"
+        echo -n -e "\r SPOTV NOW:\t\t\t\t${Font_Red}No  (Region: $(to_upper "$region"))${Font_Suffix}\n"
         return
     elif [ -z "$result" ] && [ -n "$tmpresult" ]; then
         echo -n -e "\r SPOTV NOW:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
@@ -3604,7 +3670,7 @@ function MediaUnlockTest_Google() {
         return
     fi
     local region=$(echo "$tmp" | grep K4WWud | json_query .[0][2] | grep -Eo '\[\[\\"(.*)\\",\\"S' )
-    echo -n -e "\r Google Location:\t\t\t${Font_Green}${region:4:-6}${Font_Suffix}\n"
+    echo -n -e "\r Google Location:\t\t\t${Font_Green}$(trim_chars "$region" 4 6)${Font_Suffix}\n"
 }
 
 function WebTest_GoogleSearchCAPTCHA() {
@@ -3653,11 +3719,11 @@ function MediaUnlockTest_GooglePlayStore() {
         echo -n -e "\r Google Play Store:\t\t\t${Font_Red}No${Font_Suffix}\n"
         return
     fi
-    if [[ "${region^^}" == "CN" ]]; then
+    if [[ "$(to_upper "$region")" == "CN" ]]; then
         echo -n -e "\r Google Play Store:\t\t\t${Font_Red}No  (Region: CN)${Font_Suffix}\n"
         return
     fi
-    echo -n -e "\r Google Play Store:\t\t\t${Font_Green}Yes (Region: ${region^^})${Font_Suffix}\n"
+    echo -n -e "\r Google Play Store:\t\t\t${Font_Green}Yes (Region: $(to_upper "$region"))${Font_Suffix}\n"
 }
 
 function MediaUnlockTest_GoogleGemini() {
@@ -3743,11 +3809,11 @@ function MediaUnlockTest_Tiktok() {
             echo -n -e "\r Tiktok:\t\t\t\t${Font_Yellow}Provided by Douyin${Font_Suffix}\n"
             return
         else
-            echo -n -e "\r Tiktok:\t\t\t\t${Font_Red}No  (Region: ${region^^})${Font_Suffix}\n"
+            echo -n -e "\r Tiktok:\t\t\t\t${Font_Red}No  (Region: $(to_upper "$region"))${Font_Suffix}\n"
             return
         fi
     else
-        echo -n -e "\r Tiktok:\t\t\t\t${Font_Green}Yes (Region: ${region^^})${Font_Suffix}\n"
+        echo -n -e "\r Tiktok:\t\t\t\t${Font_Green}Yes (Region: $(to_upper "$region"))${Font_Suffix}\n"
         return
     fi
 
@@ -3851,7 +3917,7 @@ function MediaUnlockTest_Zee5() {
         return
     fi
 
-    local region=$(echo "$tmpresult" | grep -woE 'country=[A-Z]{2}' | head -n 1 | cut -d'=' -f2)
+    local region=$(echo "$tmpresult" | grep -oE '(^|[^A-Za-z0-9_])country=[A-Z]{2}([^A-Za-z0-9_]|$)' | head -n 1 | grep -oE 'country=[A-Z]{2}' | cut -d'=' -f2)
     if [ -n "$region" ]; then
         echo -n -e "\r Zee5:\t\t\t\t\t${Font_Green}Yes (Region: ${region})${Font_Suffix}\n"
         return
@@ -3907,7 +3973,7 @@ function MediaUnlockTest_Viaplay() {
         return
     else
         local region=$(echo $result2 | awk -F"/" '{print $4}')
-        echo -n -e "\r Viaplay:\t\t\t\t${Font_Green}Yes (Region: ${region^^})${Font_Suffix}\n"
+        echo -n -e "\r Viaplay:\t\t\t\t${Font_Green}Yes (Region: $(to_upper "$region"))${Font_Suffix}\n"
         return
     fi
 
@@ -4021,7 +4087,7 @@ function AIUnlockTest_Gemini_location() {
         return
     fi
     local region=$(echo "$tmp" | grep K4WWud | json_query .[0][2] | grep -Eo '\[\[\\"(.*)\\",\\"S' )
-    echo -n -e "\r Google Gemini Location:\t\t${Font_Yellow}${region:4:-6}${Font_Suffix}\n"
+    echo -n -e "\r Google Gemini Location:\t\t${Font_Yellow}$(trim_chars "$region" 4 6)${Font_Suffix}\n"
 }
 
 function AIUnlockTest_Copilot() {
@@ -4034,9 +4100,9 @@ function AIUnlockTest_Copilot() {
     local result=$(echo "$tmp2" | json_query .result.value  2>&1 | tr -d '"' 2>&1) 
     local region=$(echo "$tmp" | sed -n 's/.*RevIpCC:"\([^"]*\)".*/\1/p' )
     if [[ "$result" == "Success" ]];then
-        echo -n -e "\r Microsoft Copilot:\t\t\t${Font_Green}Yes (Region: ${region^^})${Font_Suffix}\n"
+        echo -n -e "\r Microsoft Copilot:\t\t\t${Font_Green}Yes (Region: $(to_upper "$region"))${Font_Suffix}\n"
     else 
-        echo -n -e "\r Microsoft Copilot:\t\t\t${Font_Red}No  (Region: ${region^^})${Font_Suffix}\n"
+        echo -n -e "\r Microsoft Copilot:\t\t\t${Font_Red}No  (Region: $(to_upper "$region"))${Font_Suffix}\n"
     fi
 }
 
@@ -4273,9 +4339,9 @@ function MediaUnlockTest_BingSearch() {
     fi
     if [ -n "$region" ]; then
         if [ -n "$risky" ]; then
-            echo -n -e "\r Bing:\t\t\t\t\t${Font_Yellow}Yes (Region: ${region^^})${risky}${Font_Suffix}\n"
+            echo -n -e "\r Bing:\t\t\t\t\t${Font_Yellow}Yes (Region: $(to_upper "$region"))${risky}${Font_Suffix}\n"
         else
-            echo -n -e "\r Bing:\t\t\t\t\t${Font_Green}Yes (Region: ${region^^})${Font_Suffix}\n"
+            echo -n -e "\r Bing:\t\t\t\t\t${Font_Green}Yes (Region: $(to_upper "$region"))${Font_Suffix}\n"
         fi
         return
     fi
@@ -4346,11 +4412,11 @@ function MediaUnlockTest_X() {
     fi
     local httpcode=${tmpresult##*$'\n'}
     if [[ "$httpcode" == "429" ]]; then
-        echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Yellow}Rate Limited (Region: ${region^^})${Font_Suffix}\n"
+        echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Yellow}Rate Limited (Region: $(to_upper "$region"))${Font_Suffix}\n"
         return
     fi
-    if [[ "$httpcode" == "403" ]] || [[ "$httpcode" == "451" ]] || [[ " CN IR MM KP RU TM " == *" ${region^^} "* ]]; then
-        echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Red}No  (Region: ${region^^})${Font_Suffix}\n"
+    if [[ "$httpcode" == "403" ]] || [[ "$httpcode" == "451" ]] || [[ " CN IR MM KP RU TM " == *" $(to_upper "$region") "* ]]; then
+        echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Red}No  (Region: $(to_upper "$region"))${Font_Suffix}\n"
         return
     fi
     if echo "$tmpresult" | grep -qiE 'attention required|cf-chl|checking your browser|just a moment|access denied|request blocked|unusual traffic'; then
@@ -4364,7 +4430,7 @@ function MediaUnlockTest_X() {
     if [[ "$region" == "T1" ]]; then
         region="Tor"
     fi
-    echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Green}Yes (Region: ${region^^})${Font_Suffix}\n"
+    echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Green}Yes (Region: $(to_upper "$region"))${Font_Suffix}\n"
 }
 
 function MediaUnlockTest_Apple() {
@@ -4379,11 +4445,11 @@ function MediaUnlockTest_Apple() {
         return
     fi
     local supported=" AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IS IT JE JM JO JP KE KG KH KI KM KN KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS XK YE YT ZA ZM ZW "
-    if [[ "$supported" == *" ${region^^} "* ]]; then
-        echo -n -e "\r Apple:\t\t\t\t\t${Font_Green}Yes (Region: ${region^^})${Font_Suffix}\n"
+    if [[ "$supported" == *" $(to_upper "$region") "* ]]; then
+        echo -n -e "\r Apple:\t\t\t\t\t${Font_Green}Yes (Region: $(to_upper "$region"))${Font_Suffix}\n"
         return
     fi
-    echo -n -e "\r Apple:\t\t\t\t\t${Font_Red}No  (Region: ${region^^})${Font_Suffix}\n"
+    echo -n -e "\r Apple:\t\t\t\t\t${Font_Red}No  (Region: $(to_upper "$region"))${Font_Suffix}\n"
 }
 
 function MediaUnlockTest_Facebook() {
