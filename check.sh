@@ -793,29 +793,29 @@ function MediaUnlockTest_MyTVSuper() {
 
 }
 
-function MediaUnlockTest_NowE() {
+function MediaUnlockTest_NowTV() {
+    # Now E was merged into Now TV, and webtvapi.nowe.com now answers API_NOT_FOUND.
+    # Channel 630 is geo-locked and needs no login; news channels 331-333 play worldwide,
+    # and nowplayer.now.com/liveplayer/play/ answers NOT_LOGIN before any geo check.
+    local tmpresult=$(curl $curlArgs -${1} -s --max-time 10 --user-agent "${UA_Browser}" -H "Content-Type: text/plain" -H "Origin: https://news.now.com" -H "Referer: https://news.now.com/home/live" -d "{\"contentId\":\"630\",\"contentType\":\"Channel\",\"deviceId\":\"WEB\",\"deviceType\":\"WEB\",\"callerReferenceNo\":\"W$(date +%s)000\"}" "https://webtvapi.now.com/10/7/getLiveURL" 2>&1)
 
-    local result=$(curl $curlArgs -${1} -s --max-time 10 -X POST -H "Content-Type: application/json" -d '{"contentId":"202105121370235","contentType":"Vod","pin":"","deviceId":"W-60b8d30a-9294-d251-617b-6oagagn3","deviceType":"WEB"}' "https://webtvapi.nowe.com/16/1/getVodURL" | json_query . | grep 'responseCode' | awk '{print $2}' | cut -f2 -d'"' 2>&1)
-
-    if [[ "$result" == "NOT_LOGIN" ]]; then
-        echo -n -e "\r Now E:\t\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
-        return
-    elif [[ "$result" == "SUCCESS" ]]; then
-        echo -n -e "\r Now E:\t\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
-        return
-    elif [[ "$result" == "PRODUCT_INFORMATION_INCOMPLETE" ]]; then
-        echo -n -e "\r Now E:\t\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
-        return
-    elif [[ "$result" == "GEO_CHECK_FAIL" ]]; then
-        echo -n -e "\r Now E:\t\t\t\t\t${Font_Red}No${Font_Suffix}\n"
-        return
-    else
-        echo -n -e "\r Now E:\t\t\t\t\t${Font_Red}Failed (Unexpected Result: $result)${Font_Suffix}\n"
+    if [ -z "$tmpresult" ]; then
+        print_network_failure "Now TV:\t\t\t\t" "$1" "webtvapi.now.com"
         return
     fi
 
-    print_network_failure "Now E:\t\t\t\t\t" "$1" "webtvapi.nowe.com"
-    return
+    local result=$(echo "$tmpresult" | grep -o '"responseCode":"[^"]*"' | cut -f4 -d'"')
+
+    if [[ "$result" == "SUCCESS" ]] || [[ "$result" == "NOT_LOGIN" ]] || [[ "$result" == "PRODUCT_INFORMATION_INCOMPLETE" ]]; then
+        echo -n -e "\r Now TV:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
+        return
+    elif [[ "$result" == "GEO_CHECK_FAIL" ]]; then
+        echo -n -e "\r Now TV:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
+        return
+    else
+        echo -n -e "\r Now TV:\t\t\t\t${Font_Red}Failed (Unexpected Result: $result)${Font_Suffix}\n"
+        return
+    fi
 
 }
 
@@ -4706,7 +4706,7 @@ function EU_UnlockTest() {
 function HK_UnlockTest() {
     echo "=============[ Hong Kong ]============="
 	local result=$(
-	    run_check MediaUnlockTest_NowE ${1} &
+	    run_check MediaUnlockTest_NowTV ${1} &
 	    run_check MediaUnlockTest_ViuTV ${1} &
 	    run_check MediaUnlockTest_Viu.com ${1} &
 	    run_check MediaUnlockTest_MyTVSuper ${1} &
@@ -4718,7 +4718,7 @@ function HK_UnlockTest() {
 	    # MediaUnlockTest_BilibiliHKMCTW ${1} &
 	)
     wait
-    local array=("Now E:" "Viu.TV:" "Viu.com:" "MyTVSuper:" "HBO Max:" "HOY TV" "BiliBili Hongkong/Macau/Taiwan:" "Bahamut Anime:" "NBA TV:")
+    local array=("Now TV:" "Viu.TV:" "Viu.com:" "MyTVSuper:" "HBO Max:" "HOY TV" "BiliBili Hongkong/Macau/Taiwan:" "Bahamut Anime:" "NBA TV:")
     echo_Result ${result} ${array}
     echo "======================================="
 }
