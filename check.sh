@@ -1043,15 +1043,17 @@ function MediaUnlockTest_Channel4() {
 }
 
 function MediaUnlockTest_ITVHUB() {
-    local result=$(curl $curlArgs -${1} -fsL --write-out %{http_code} --output /dev/null --max-time 10 "https://simulcast.itv.com/playlist/itvonline/ITV" 2>&1)
+    # The CDN never answers curl's default User-Agent, so a browser one is required
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sL --write-out '\n%{http_code}' --max-time 10 "https://simulcast.itv.com/playlist/itvonline/ITV")
+    local result=${tmpresult##*$'\n'}
     if [ "$result" = "000" ]; then
         print_network_failure "ITV Hub:\t\t\t\t" "$1" "simulcast.itv.com"
         return
+    elif [[ "$tmpresult" == *'"geoblock"'* ]] || [ "$result" = "403" ]; then
+        echo -n -e "\r ITV Hub:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
+        return
     elif [ "$result" = "404" ]; then
         echo -n -e "\r ITV Hub:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
-        return
-    elif [ "$result" = "403" ]; then
-        echo -n -e "\r ITV Hub:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
         return
     else
         echo -n -e "\r ITV Hub:\t\t\t\t${Font_Red}Failed (Unexpected Result: $result)${Font_Suffix}\n"
