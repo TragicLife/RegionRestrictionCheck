@@ -4203,7 +4203,7 @@ function MediaUnlockTest_RakutenMagazine() {
 
 function MediaUnlockTest_AnimeFesta() {
     local result1=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -fsLI -X GET --write-out %{http_code} --output /dev/null --max-time 10 "https://api-animefesta.iowl.jp/v1/titles/1" -H 'x-requested-with: XMLHttpRequest'  2>&1)
-    if [[ "$result1" == "curl"* ]]; then
+    if [[ "$result1" == "000" ]]; then
         print_network_failure "AnimeFesta:\t\t\t\t" "$1" "api-animefesta.iowl.jp"
         return
     fi
