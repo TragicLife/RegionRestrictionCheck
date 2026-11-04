@@ -1440,7 +1440,7 @@ function MediaUnlockTest_PrimeVideo_Region() {
         print_network_failure "Amazon Prime Video:\t\t\t" "$1" "ab9f7h23rcdn.eu.api.amazonvideo.com"
         return
     fi
-    local VPNDetected=$(echo $tmpresult1 | grep "您的设备使用了 VPN 或代理服务连接互联网请禁用并重试")
+    local VPNDetected=$(echo $tmpresult1 | grep "VPN")
 
     local result=$(echo $tmpresult | grep -oE '"currentTerritory":"[A-Z]{2}"' | head -n 1 | cut -f4 -d'"')
     if [ -n "$result" ]; then
@@ -1571,7 +1571,7 @@ function MediaUnlockTest_HotStar() {
         local region_note=""
         [ -n "$region" ] && region_note=" (Region: $region)"
         if [ "$result" = "475" ]; then
-            echo -n -e "\r HotStar:\t\t\t\t${Font_Red}No${region_note}${Font_Suffix}\n"
+            echo -n -e "\r HotStar:\t\t\t\t${Font_Red}No ${region_note}${Font_Suffix}\n"
             return
         fi
         local site_region=$(curl $curlArgs -${1} -s -o /dev/null -L --max-time 10 -w '%{url_effective}\n' "https://www.hotstar.com" | sed 's@.*com/@@' | tr 'a-z' 'A-Z')
