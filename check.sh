@@ -1163,7 +1163,7 @@ function MediaUnlockTest_Viu.com() {
     result=$(echo $tmpresult | cut -f5 -d"/")
     if [ -n "$result" ]; then
         if [[ "$result" == "no-service" ]]; then
-            echo -n -e "\r Viu.com:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
+            echo -n -e "\r Viu.com:\t\t\t\t${Font_Yellow}Unsupported Region${Font_Suffix}\n"
             return
         else
             result=$(echo $result | tr 'a-z' 'A-Z')
