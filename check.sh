@@ -327,7 +327,7 @@ curl() {
 }
 
 # Runs a check function; if any of its requests hit a Cloudflare WAF block page,
-# its result lines are replaced with "Blocked by Cloudflare WAF".
+# its result lines are replaced with "Blocked by WAF".
 # $1: check function, remaining arguments are passed through (usually the IP version)
 run_check() {
     local CF_WAF_MARK
@@ -338,7 +338,7 @@ run_check() {
         local line
         while IFS= read -r line; do
             if [[ "$line" == *$'\033'* ]]; then
-                printf '%s%b\n' "${line%%$'\033'*}" "${Font_Red}No  (Blocked by Cloudflare WAF)${Font_Suffix}"
+                printf '%s%b\n' "${line%%$'\033'*}" "${Font_Red}No  (Blocked by WAF)${Font_Suffix}"
             elif [ -n "$line" ]; then
                 printf '%s\n' "$line"
             fi
@@ -1571,7 +1571,7 @@ function MediaUnlockTest_HotStar() {
         local region_note=""
         [ -n "$region" ] && region_note=" (Region: $region)"
         if [ "$result" = "475" ]; then
-            echo -n -e "\r HotStar:\t\t\t\t${Font_Red}No ${region_note}${Font_Suffix}\n"
+            echo -n -e "\r HotStar:\t\t\t\t${Font_Yellow}Unsupported${region_note}${Font_Suffix}\n"
             return
         fi
         local site_region=$(curl $curlArgs -${1} -s -o /dev/null -L --max-time 10 -w '%{url_effective}\n' "https://www.hotstar.com" | sed 's@.*com/@@' | tr 'a-z' 'A-Z')
@@ -4017,7 +4017,7 @@ function MediaUnlockTest_BilibiliAnimeNew() {
         return
     else
         local country=$(echo $tmp | json_query '.data.country' | tr -d '"' )
-        echo -n -e "\r Bilibili Anime:\t\t\t${Font_Red}No  (Country: $country)${Font_Suffix}\n"
+        echo -n -e "\r Bilibili Anime:\t\t\t${Font_Yellow}Overseas (Country: $country)${Font_Suffix}\n"
         return
     fi
 }
