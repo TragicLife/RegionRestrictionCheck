@@ -966,14 +966,13 @@ function MediaUnlockTest_HBOMax() {
     local homeMarket=$(echo $APITemp | json_query .routing.homeMarket | tr -d '"')
     local tmpresult=$(curl $curlArgs -${1} -sS "https://default.$tenant-$homeMarket.$env.$domain/users/me" -H 'x-disco-client: WEB:10.15.7:dotcom-hbomax:7.7.0' -H 'x-disco-params: realm=bolt,bid=beam,features=ar' -b "st=${Token}" 2>&1)
     local result=$(echo $tmpresult | json_query .data.attributes.currentLocationTerritory | tr -d '"')
-    local availableRegion=$(curl $curlArgs -${1} -sSL "https://www.hbomax.com/" 2>&1 | grep -oE '"url":"/[a-z]{2}/[a-z]{2}"' | cut -f4 -d'"' | cut -f2 -d'/' | sort -n | uniq | xargs | tr a-z A-Z)
-    local isVPN=$(curl $curlArgs -${1} -sS 'https://default.any-any.prd.api.hbomax.com/any/playback/v1/playbackInfo'  -b 'st=eyJhbGciOiJSUzI1NiJ9.eyJqdGkiOiJ0b2tlbi0wOWQxOTg4Yy1mZmUzLTQxMDEtOWI5My0yNDU1ZTkyNGQ1YjYiLCJpc3MiOiJmcGEtaXNzdWVyIiwic3ViIjoiVVNFUklEOmJvbHQ6YjYzOTgxZWQtNzA2MC00ZGYwLThkZGItZjA2YjFkNWRjZWVkIiwiaWF0IjoxNzQzODQwMzgwLCJleHAiOjIwNTkyMDAzODAsInR5cGUiOiJBQ0NFU1NfVE9LRU4iLCJzdWJkaXZpc2lvbiI6ImJlYW1fYW1lciIsInNjb3BlIjoiZGVmYXVsdCIsImlpZCI6IjQwYTgzZjNlLTY4OTktNDE3Mi1hMWY2LWJjZDVjN2ZkNjA4NSIsInZlcnNpb24iOiJ2MyIsImFub255bW91cyI6ZmFsc2UsImRldmljZUlkIjoiNWY3YzViZjQtYjc4Ny00NDRjLWJhYTYtMzU5MzgwYWFiM2RmIn0.f5HTgIV2v0nQQDp5LQG0xqLrxyACdvnMDiWO_viX_CUGqtc5ncSjp_LgM30QFkkMnINFhzKEGRpsZvb-o3Pj_Z39uRBr5LCeiCPR7ssV-_SXyRFVRRDEB2lpxyz7jmdD1SxvA06HnEwTbZQzlbZ7g9GXq02yNdEfHlqYEh_4WF88UbXfeieYTd4TH7kwN1RE50NfQUS6f0WmzpAbpiULyd87mpTeynchFNMMz-YHVzZ_-nDW6geihXc3tS0FKVSR8fdOSPQFzEYOLCfhInufiPahiXI-OKF89aShAqM-y4Hx_eukGnsq3mO5wa3unnqVr9Kzc61BIhHh1Hs2bqYiYg;' -H 'x-disco-client: WEB:10.15.7:dotcom-hbomax:7.7.0' -H 'x-disco-params: realm=bolt,bid=beam,features=ar'  2>&1 )
-    # Token may expire.
+    # The homepage returns 403 without a browser User-Agent. Supported regions are its locales plus the territories they cover.
+    local availableRegion=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL "https://www.hbomax.com/" 2>&1 | sed -n 's/.*id="__DOTCOM_GEO__">\([^<]*\)<\/script>.*/\1/p' | json_query -r '([.pageLocales.availableLocales[][:2]] | unique) as $c | ($c + [.brand.territory | to_entries[] | select(.key as $k | $c | index($k)) | .value[]]) | join(" ") | ascii_upcase')
+    if [ -z "$availableRegion" ]; then
+        echo -n -e "\r HBO Max:\t\t\t\t${Font_Red}Failed (Error: PAGE ERROR)${Font_Suffix}\n"
+        return
+    fi
     if [[ "$availableRegion" == *"$result"* ]] && [ -n "$result" ]; then
-        if [[ "$isVPN" == *"VPN"* ]]; then 
-            echo -n -e "\r HBO Max:\t\t\t\t${Font_Red}No  (VPN Detected;Region: $result)${Font_Suffix}\n"
-            return
-        fi
         echo -n -e "\r HBO Max:\t\t\t\t${Font_Green}Yes (Region: $result)${Font_Suffix}\n"
         return
     else
