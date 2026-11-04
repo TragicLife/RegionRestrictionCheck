@@ -639,17 +639,24 @@ function MediaUnlockTest_DisneyPlus() {
         print_network_failure "Disney+:\t\t\t\t" "$1" "disney.api.edge.bamgrid.com" "[3]"
         return
     fi
-    local previewchecktmp=$(curl $curlArgs -${1} -sS -o /dev/null -L --max-time 10 -w '%{url_effective}\n' "https://www.disneyplus.com" 2>&1)
-    if [[ "$previewchecktmp" == "curl"* ]]; then
-        print_network_failure "Disney+:\t\t\t\t" "$1" "www.disneyplus.com" "[4]"
-        return
-    fi
+    # Disney+ can block an IP from its site while bamgrid stays reachable: the API
+    # then reports a supported region, but the service is not usable from this IP.
+    local previewchecktmp previewrc
+    previewchecktmp=$(curl $curlArgs -${1} -s -o /dev/null -L --max-time 10 -w '%{url_effective}\n' "https://www.disneyplus.com" 2>/dev/null)
+    previewrc=$?
     local previewcheck=$(echo $previewchecktmp | grep preview)
     local isUnavailable=$(echo $previewcheck | grep 'unavailable')
     local region=$(echo $tmpresult | json_query . | grep 'countryCode' | cut -f4 -d'"')
     local inSupportedLocation=$(echo $tmpresult | json_query . | grep 'inSupportedLocation' | awk '{print $2}' | cut -f1 -d',')
 
-    if [[ "$region" == "JP" ]]; then
+    # A timeout (28) proves nothing about a block, so it stays a network failure below.
+    if [ "$previewrc" -ne 0 ] && [ "$previewrc" -ne 28 ] && [ -n "$region" ] && [[ "$inSupportedLocation" == "true" ]]; then
+        echo -n -e "\r Disney+:\t\t\t\t${Font_Red}No  (Region: $region, Site Blocked)${Font_Suffix}\n"
+        return
+    elif [ "$previewrc" -ne 0 ]; then
+        print_network_failure "Disney+:\t\t\t\t" "$1" "www.disneyplus.com" "[4]"
+        return
+    elif [[ "$region" == "JP" ]]; then
         echo -n -e "\r Disney+:\t\t\t\t${Font_Green}Yes (Region: JP)${Font_Suffix}\n"
         return
     elif [ -n "$region" ] && [[ "$inSupportedLocation" == "false" ]] && [ -z "$isUnavailable" ]; then
@@ -1567,15 +1574,25 @@ function MediaUnlockTest_HotStar() {
         return
     elif [ "$result" = "401" ] || [ "$result" = "475" ]; then
         # The geo cookie carries the detected country even where HotStar is not served (475).
-        local region=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} -sI --max-time 10 "https://www.hotstar.com" | grep 'geo=' | sed 's/.*geo=//' | cut -f1 -d",")
+        local headers=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} -sI --max-time 10 "https://www.hotstar.com")
+        local region=$(echo "$headers" | grep 'geo=' | sed 's/.*geo=//' | cut -f1 -d",")
         local region_note=""
         [ -n "$region" ] && region_note=" (Region: $region)"
-        if [ "$result" = "475" ]; then
-            echo -n -e "\r HotStar:\t\t\t\t${Font_Yellow}Unsupported${region_note}${Font_Suffix}\n"
+        if echo "$headers" | grep -qi '^location:.*disneyplus\.com'; then
+            echo -n -e "\r HotStar:\t\t\t\t${Font_Yellow}Served via Disney+ SEA${region_note}${Font_Suffix}\n"
             return
         fi
+        # Served in these countries only. hotstar.com still answers 200 elsewhere: /us is
+        # a leftover Disney Bundle landing page from the 2021 US closure.
+        case "$result:$region" in
+        *:IN | *:GB | *:CA | *:SG | 401:) ;;
+        *)
+            echo -n -e "\r HotStar:\t\t\t\t${Font_Yellow}Unsupported${region_note}${Font_Suffix}\n"
+            return
+            ;;
+        esac
         local site_region=$(curl $curlArgs -${1} -s -o /dev/null -L --max-time 10 -w '%{url_effective}\n' "https://www.hotstar.com" | sed 's@.*com/@@' | tr 'a-z' 'A-Z')
-        if [ -n "$region" ] && [ "$region" = "$site_region" ]; then
+        if [ "$result" = "401" ] && [ -n "$region" ] && [ "$region" = "$site_region" ]; then
             echo -n -e "\r HotStar:\t\t\t\t${Font_Green}Yes${region_note}${Font_Suffix}\n"
         else
             echo -n -e "\r HotStar:\t\t\t\t${Font_Red}No ${region_note}${Font_Suffix}\n"
@@ -4552,10 +4569,12 @@ function NA_UnlockTest() {
     echo_Result ${result} ${array}
     ShowRegion CA
     local result=$(
+    run_check MediaUnlockTest_HotStar ${1} &
     run_check MediaUnlockTest_CBCGem ${1} &
     run_check MediaUnlockTest_Crave ${1} &
     )
     wait
+    echo "$result" | grep "HotStar:"
     echo "$result" | grep "CBC Gem:"
     echo "$result" | grep "Crave:"
     echo "======================================="
@@ -4578,6 +4597,7 @@ function EU_UnlockTest() {
     echo_Result ${result} ${array}
     ShowRegion GB
     local result=$(
+    run_check MediaUnlockTest_HotStar ${1} &
     run_check MediaUnlockTest_SkyGo ${1} &
     run_check MediaUnlockTest_BritBox ${1} &
     run_check MediaUnlockTest_ITVHUB ${1} &
@@ -4587,7 +4607,7 @@ function EU_UnlockTest() {
     run_check MediaUnlockTest_DiscoveryPlusUK ${1} &
     )
     wait
-    local array=("Sky Go:" "BritBox:" "ITV Hub:" "Channel 4:" "Channel 5" "BBC iPLAYER:" "Discovery+ UK:")
+    local array=("HotStar:" "Sky Go:" "BritBox:" "ITV Hub:" "Channel 4:" "Channel 5" "BBC iPLAYER:" "Discovery+ UK:")
     echo_Result ${result} ${array}
     ShowRegion FR
     local result=$(
@@ -4741,7 +4761,6 @@ function Global_UnlockTest() {
     echo "============[ Multination ]============"
     local result=$(
     run_check MediaUnlockTest_Dazn ${1} &
-    run_check MediaUnlockTest_HotStar ${1} &
     run_check MediaUnlockTest_DisneyPlus ${1} &
     run_check MediaUnlockTest_Netflix ${1} &
     run_check MediaUnlockTest_YouTube_Premium ${1} &
@@ -4769,7 +4788,7 @@ function Global_UnlockTest() {
     run_check MediaUnlockTest_BilibiliAnimeNew ${1} &
     )
     wait
-    local array=("Dazn:" "HotStar:" "Disney+:" "Netflix:" "YouTube Premium:" "Amazon Prime Video:" "TVBAnywhere+:" "iQyi Oversea:" "Bilibili Anime:" "Viu.com:" "Tiktok" "YouTube CDN:" "Google Location:" "Google Search CAPTCHA Free:" "Google Play Store:" "Google Gemini:" "YouTube Region:" "Netflix Preferred CDN:" "Wikipedia" "Bing:" "Microsoft Location:" "Reddit:" "X (formerly Twitter):" "Apple:" "Facebook:" "Spotify" "Steam Currency:" "Instagram")
+    local array=("Dazn:" "Disney+:" "Netflix:" "YouTube Premium:" "Amazon Prime Video:" "TVBAnywhere+:" "iQyi Oversea:" "Bilibili Anime:" "Viu.com:" "Tiktok" "YouTube CDN:" "Google Location:" "Google Search CAPTCHA Free:" "Google Play Store:" "Google Gemini:" "YouTube Region:" "Netflix Preferred CDN:" "Wikipedia" "Bing:" "Microsoft Location:" "Reddit:" "X (formerly Twitter):" "Apple:" "Facebook:" "Spotify" "Steam Currency:" "Instagram")
 	  echo_Result ${result} ${array}
     echo "======================================="
 }
@@ -4849,11 +4868,12 @@ function SEA_UnlockTest(){
     echo "==========[ SouthEastAsia ]============"
     local result=$(
     # MediaUnlockTest_HBOGO_ASIA ${1} &
+    run_check MediaUnlockTest_HotStar ${1} &
     run_check MediaUnlockTest_HBOMax ${1} &
     MediaUnblockTest_BGlobalSEA ${1} &
     )
     wait
-    local array=("HBO Max:" "B-Global SouthEastAsia:")
+    local array=("HotStar:" "HBO Max:" "B-Global SouthEastAsia:")
     echo_Result ${result} ${array}
     ShowRegion SG
     local result=$(
