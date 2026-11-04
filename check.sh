@@ -153,6 +153,19 @@ curl() {
         args+=("$1")
         shift
     done
+    if [ -n "$tmpout" ]; then
+        # -f discards the body of an HTTP error, which is where a WAF page would be.
+        # The output is unused here and %{http_code} is the same without it.
+        local i
+        for i in "${!args[@]}"; do
+            if [[ "${args[i]}" == "--fail" ]]; then
+                unset "args[i]"
+            elif [[ "${args[i]}" =~ ^-[A-Za-z0-9]*f[A-Za-z0-9]*$ ]]; then
+                args[i]="${args[i]//f/}"
+                [[ "${args[i]}" == "-" ]] && unset "args[i]"
+            fi
+        done
+    fi
     if [ -n "$outfile" ]; then
         command "${curl_bin[@]}" "${args[@]}"
         rc=$?
@@ -313,6 +326,12 @@ has_ipv6_address() {
     host="${host%%/*}"
     curl $useNIC -6 -s -o /dev/null --connect-timeout 2 --max-time 3 "http://${host}/" >/dev/null 2>&1
     [ $? -ne 6 ]
+}
+
+# Print a message for the calling test to stderr, only when DEBUG=1 is set.
+# $*: message
+debug_log() {
+    [ -z "$DEBUG" ] || echo "[${FUNCNAME[1]}] $*" >&2
 }
 
 # Print the result line for a request that failed at the network level.
@@ -973,7 +992,12 @@ function MediaUnlockTest_HBOMax() {
         return
     fi
     local Token=$(echo $GetToken | json_query .data.attributes.token | tr -d '"' )
-    local APITemp=$(curl $curlArgs -${1} -sS "https://default.any-any.prd.api.hbomax.com/session-context/headwaiter/v1/bootstrap" -H 'x-disco-client: WEB:10.15.7:dotcom-hbomax:7.7.0' -H 'x-disco-params: realm=bolt,bid=beam,features=ar' -X POST -b "st=${Token}")
+    local APITemp=$(curl $curlArgs -${1} -sS "https://default.any-any.prd.api.hbomax.com/session-context/headwaiter/v1/bootstrap" -H 'x-disco-client: WEB:10.15.7:dotcom-hbomax:7.7.0' -H 'x-disco-params: realm=bolt,bid=beam,features=ar' -X POST -b "st=${Token}" 2>&1)
+    if [[ "$APITemp" == "curl"* ]]; then
+        debug_log "$APITemp"
+        print_network_failure "HBO Max:\t\t\t\t" "$1" "default.any-any.prd.api.hbomax.com"
+        return
+    fi
     local domain=$(echo $APITemp | json_query .routing.domain | tr -d '"')
     local tenant=$(echo $APITemp | json_query .routing.tenant | tr -d '"')
     local env=$(echo $APITemp | json_query .routing.env | tr -d '"')
@@ -1246,7 +1270,8 @@ function MediaUnlockTest_Niconico() {
 
 function MediaUnlockTest_MGStage() {
     local result=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSI -X GET "https://www.mgstage.com/" --write-out %{http_code} --output /dev/null 2>&1)
-    if [[ "$result" == "curl"* ]]; then
+    if [[ "$result" == "000"* || "$result" == "curl"* ]]; then
+        debug_log "$result"
         print_network_failure "MGStage:\t\t\t\t" "$1" "www.mgstage.com"
         return
     fi
@@ -1904,8 +1929,9 @@ function MediaUnlockTest_videoland() {
 }
 
 function MediaUnlockTest_NPO_Start_Plus() {
-    local tmptoken=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS  --max-time 10 "https://npo.nl/start/api/domain/player-token?productId=BV_101410466")
+    local tmptoken=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS  --max-time 10 "https://npo.nl/start/api/domain/player-token?productId=BV_101410466" 2>&1)
     if [[ "$tmptoken" == "curl"* ]]; then
+        debug_log "$tmptoken"
         print_network_failure "NPO Start Plus:\t\t\t" "$1" "npo.nl"
         return
     fi
@@ -4238,20 +4264,22 @@ function MediaUnlockTest_mora() {
 }
 
 function MediaUnlockTest_DAnimeStore(){
-    local tmpresult=$(curl $curlArgs -${1} -sSL --max-time 10 -sL 'https://animestore.docomo.ne.jp/animestore/reg_pc' 2>&1)
-    if [[ -z "$tmpresult" || "$tmpresult" == "curl"* ]]; then
+    # The redirect target decides the result. It can be an HTTP redirect or a meta
+    # refresh in the page, so headers (-i) and body of every hop are searched.
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSLi --max-time 10 'https://animestore.docomo.ne.jp/animestore/reg_pc' 2>&1)
+    if [[ "$tmpresult" == *"animestore/CF/overseas_warn"* ]]; then
+        echo -n -e "\r D Anime Store:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
+        return
+    elif [[ "$tmpresult" == *"cfg.smt.docomo.ne.jp/authx/cgi/baseauth"* ]]; then
+        echo -n -e "\r D Anime Store:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
+        return
+    elif [[ -z "$tmpresult" || "$tmpresult" == *"curl: ("* ]]; then
+        debug_log "$tmpresult"
         print_network_failure "D Anime Store:\t\t\t\t" "$1" "animestore.docomo.ne.jp"
         return
     fi
-
-    local isBlocked=$(echo $tmpresult | grep '海外')
-    if [ -n "$isBlocked" ];then
-        echo -n -e "\r D Anime Store:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
-        return
-    else
-        echo -n -e "\r D Anime Store:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
-        return
-    fi
+    debug_log "$tmpresult"
+    echo -n -e "\r D Anime Store:\t\t\t\t${Font_Red}No  (Blocked by WAF)${Font_Suffix}\n"
 }
 
 function MediaUnlockTest_EroGameSpace(){
