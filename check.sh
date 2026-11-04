@@ -4656,6 +4656,7 @@ function HK_UnlockTest() {
 	local result=$(
 	    run_check MediaUnlockTest_NowE ${1} &
 	    run_check MediaUnlockTest_ViuTV ${1} &
+	    run_check MediaUnlockTest_Viu.com ${1} &
 	    run_check MediaUnlockTest_MyTVSuper ${1} &
 	    # MediaUnlockTest_HBOGO_ASIA ${1} &
         run_check MediaUnlockTest_HBOMax ${1} &
@@ -4665,7 +4666,7 @@ function HK_UnlockTest() {
 	    # MediaUnlockTest_BilibiliHKMCTW ${1} &
 	)
     wait
-    local array=("Now E:" "Viu.TV:" "MyTVSuper:" "HBO Max:" "HOY TV" "BiliBili Hongkong/Macau/Taiwan:" "Bahamut Anime:" "NBA TV:")
+    local array=("Now E:" "Viu.TV:" "Viu.com:" "MyTVSuper:" "HBO Max:" "HOY TV" "BiliBili Hongkong/Macau/Taiwan:" "Bahamut Anime:" "NBA TV:")
     echo_Result ${result} ${array}
     echo "======================================="
 }
@@ -4767,7 +4768,6 @@ function Global_UnlockTest() {
     run_check MediaUnlockTest_PrimeVideo_Region ${1} &
     run_check MediaUnlockTest_TVBAnywhere ${1} &
     run_check MediaUnlockTest_iQYI_Region ${1} &
-    run_check MediaUnlockTest_Viu.com ${1} &
     run_check MediaUnlockTest_YouTube_CDN ${1} &
     run_check MediaUnlockTest_NetflixCDN ${1} &
     run_check MediaUnlockTest_Wikipedia_Editable ${1} &
@@ -4788,7 +4788,7 @@ function Global_UnlockTest() {
     run_check MediaUnlockTest_BilibiliAnimeNew ${1} &
     )
     wait
-    local array=("Dazn:" "Disney+:" "Netflix:" "YouTube Premium:" "Amazon Prime Video:" "TVBAnywhere+:" "iQyi Oversea:" "Bilibili Anime:" "Viu.com:" "Tiktok" "YouTube CDN:" "Google Location:" "Google Search CAPTCHA Free:" "Google Play Store:" "Google Gemini:" "YouTube Region:" "Netflix Preferred CDN:" "Wikipedia" "Bing:" "Microsoft Location:" "Reddit:" "X (formerly Twitter):" "Apple:" "Facebook:" "Spotify" "Steam Currency:" "Instagram")
+    local array=("Dazn:" "Disney+:" "Netflix:" "YouTube Premium:" "Amazon Prime Video:" "TVBAnywhere+:" "iQyi Oversea:" "Bilibili Anime:" "Tiktok" "YouTube CDN:" "Google Location:" "Google Search CAPTCHA Free:" "Google Play Store:" "Google Gemini:" "YouTube Region:" "Netflix Preferred CDN:" "Wikipedia" "Bing:" "Microsoft Location:" "Reddit:" "X (formerly Twitter):" "Apple:" "Facebook:" "Spotify" "Steam Currency:" "Instagram")
 	  echo_Result ${result} ${array}
     echo "======================================="
 }
@@ -4807,6 +4807,7 @@ function SA_UnlockTest() {
 function OA_UnlockTest() {
     echo "==============[ Oceania ]=============="
     local result=$(
+    run_check MediaUnlockTest_Viu.com ${1} &
     run_check MediaUnlockTest_NBATV ${1} &
     run_check MediaUnlockTest_AcornTV ${1} &
     run_check MediaUnlockTest_SHOWTIME ${1} &
@@ -4814,7 +4815,7 @@ function OA_UnlockTest() {
     run_check MediaUnlockTest_ParamountPlus ${1} &
     )
     wait
-    local array=("NBA TV:" "Acorn TV:" "SHOWTIME:" "BritBox:" "Paramount+:")
+    local array=("Viu.com:" "NBA TV:" "Acorn TV:" "SHOWTIME:" "BritBox:" "Paramount+:")
     echo_Result ${result} ${array}
     ShowRegion AU
     local result=$(
@@ -4864,16 +4865,17 @@ function KR_UnlockTest() {
     echo "======================================="
 }
 
-function SEA_UnlockTest(){
-    echo "==========[ SouthEastAsia ]============"
+function Asia_UnlockTest(){
+    echo "================[ Asia ]==============="
     local result=$(
     # MediaUnlockTest_HBOGO_ASIA ${1} &
     run_check MediaUnlockTest_HotStar ${1} &
+    run_check MediaUnlockTest_Viu.com ${1} &
     run_check MediaUnlockTest_HBOMax ${1} &
     MediaUnblockTest_BGlobalSEA ${1} &
     )
     wait
-    local array=("HotStar:" "HBO Max:" "B-Global SouthEastAsia:")
+    local array=("HotStar:" "Viu.com:" "HBO Max:" "B-Global SouthEastAsia:")
     echo_Result ${result} ${array}
     ShowRegion SG
     local result=$(
@@ -5117,7 +5119,7 @@ function Start() {
         echo -e "${Font_SkyBlue}Input Number  [6]: [ Multination + Europe ]${Font_Suffix}"
         echo -e "${Font_SkyBlue}Input Number  [7]: [ Multination + Oceania ]${Font_Suffix}"
         echo -e "${Font_SkyBlue}Input Number  [8]: [ Multination + Korean ]${Font_Suffix}"
-        echo -e "${Font_SkyBlue}Input Number  [9]: [ Multination + SouthEastAsia ]${Font_Suffix}"
+        echo -e "${Font_SkyBlue}Input Number  [9]: [ Multination + Asia ]${Font_Suffix}"
         echo -e "${Font_SkyBlue}Input Number [10]: [ AI Platform ]${Font_Suffix}"
         echo -e "${Font_SkyBlue}Input Number [11]: [ Multination + Africa ]${Font_Suffix}"
         echo -e "${Font_SkyBlue}Input Number  [0]: [ Multination Only ]${Font_Suffix}"
@@ -5133,7 +5135,7 @@ function Start() {
         echo -e "${Font_SkyBlue}输入数字  [6]: [ 跨国平台+欧洲平台 ]检测${Font_Suffix}"
         echo -e "${Font_SkyBlue}输入数字  [7]: [跨国平台+大洋洲平台]检测${Font_Suffix}"
         echo -e "${Font_SkyBlue}输入数字  [8]: [ 跨国平台+韩国平台 ]检测${Font_Suffix}"
-        echo -e "${Font_SkyBlue}输入数字  [9]: [跨国平台+东南亚平台]检测${Font_Suffix}"
+        echo -e "${Font_SkyBlue}输入数字  [9]: [ 跨国平台+亚洲平台 ]检测${Font_Suffix}"
         echo -e "${Font_SkyBlue}输入数字 [10]: [      AI 平台     ]检测${Font_Suffix}"
         echo -e "${Font_SkyBlue}输入数字 [11]: [ 跨国平台+非洲平台 ]检测${Font_Suffix}"
         echo -e "${Font_SkyBlue}输入数字  [0]: [   只进行跨国平台  ]检测${Font_Suffix}"
@@ -5272,12 +5274,12 @@ function RunScript() {
             CheckV4
             if [[ "$isv4" -eq 1 ]]; then
                 Global_UnlockTest 4
-                SEA_UnlockTest 4
+                Asia_UnlockTest 4
             fi
             CheckV6
             if [[ "$isv6" -eq 1 ]]; then
                 Global_UnlockTest 6
-                SEA_UnlockTest 6
+                Asia_UnlockTest 6
             fi
             Goodbye
 
@@ -5354,7 +5356,7 @@ function RunScript() {
             EU_UnlockTest 4
             OA_UnlockTest 4
             KR_UnlockTest 4
-            SEA_UnlockTest 4
+            Asia_UnlockTest 4
             AI_UnlockTest 4
             AF_UnlockTest 4
         fi
@@ -5369,7 +5371,7 @@ function RunScript() {
             EU_UnlockTest 6
             OA_UnlockTest 6
             KR_UnlockTest 6
-            SEA_UnlockTest 6
+            Asia_UnlockTest 6
             AI_UnlockTest 6
             AF_UnlockTest 6
         fi
