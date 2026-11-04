@@ -284,6 +284,13 @@ checkDependencies
 json_query() {
     local input output
     input=$(cat)
+    # jq exits 0 without output on empty input, so that has to be caught here.
+    if [ -z "$input" ]; then
+        if [ -n "$DEBUG" ]; then
+            echo "[${FUNCNAME[1]:-main}] jq '$*': response is empty" >&2
+        fi
+        return 1
+    fi
     if ! output=$(printf '%s' "$input" | jq "$@" 2>/dev/null); then
         if [ -n "$DEBUG" ]; then
             echo "[${FUNCNAME[1]:-main}] jq '$*': response is not valid JSON: $(printf '%s' "$input" | head -c 200 | tr -d '\n')" >&2
@@ -3702,14 +3709,27 @@ function MediaUnlockTest_MYTV() {
     echo -n -e "\r MYTV:\t\t\t\t\t${Font_Red}Failed${Font_Suffix}\n"
 }
 
-function MediaUnlockTest_Google() {
-    local tmp=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 'https://bard.google.com/_/BardChatUi/data/batchexecute'   -H 'accept-language: en-US'   --data-raw 'f.req=[[["K4WWud","[[0],[\"en-US\"]]",null,"generic"]]]' 2>&1)
+# Print the location Google derives from the IP, as shown in the Gemini footer.
+# bard.google.com no longer serves this RPC: it answers 404, or redirects to
+# gemini.google.com as a GET, so gemini.google.com has to be requested directly.
+# $1: label including the tab padding, $2: IP version, $3: color of the location
+print_google_location() {
+    local tmp=$(curl $curlArgs -${2} --user-agent "${UA_Browser}" -SsL --max-time 10 'https://gemini.google.com/_/BardChatUi/data/batchexecute'   -H 'accept-language: en-US'   --data-raw 'f.req=[[["K4WWud","[[0],[\"en-US\"]]",null,"generic"]]]' 2>&1)
     if [[ "$tmp" == "curl"* ]]; then
-        print_network_failure "Google Location:\t\t\t" "$1" "bard.google.com"
+        print_network_failure "$1" "$2" "gemini.google.com"
         return
     fi
-    local region=$(echo "$tmp" | grep K4WWud | json_query .[0][2] | grep -Eo '\[\[\\"(.*)\\",\\"S' )
-    echo -n -e "\r Google Location:\t\t\t${Font_Green}$(trim_chars "$region" 4 6)${Font_Suffix}\n"
+    local region=$(echo "$tmp" | grep K4WWud | json_query -r '.[0][2] | fromjson | .[0][0] // empty')
+    if [ -z "$region" ]; then
+        debug_log "no location for IPv${2}, response: $(printf '%s' "$tmp" | head -c 300 | tr -d '\n')"
+        echo -n -e "\r ${1}${Font_Red}Failed${Font_Suffix}\n"
+        return
+    fi
+    echo -n -e "\r ${1}${3}${region}${Font_Suffix}\n"
+}
+
+function MediaUnlockTest_Google() {
+    print_google_location "Google Location:\t\t\t" "$1" "$Font_Green"
 }
 
 function WebTest_GoogleSearchCAPTCHA() {
@@ -4120,13 +4140,7 @@ function MediaUnlockTest_Sora() {
 }
 
 function AIUnlockTest_Gemini_location() {
-    local tmp=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 'https://gemini.google.com/_/BardChatUi/data/batchexecute'   -H 'accept-language: en-US'   --data-raw 'f.req=[[["K4WWud","[[0],[\"en-US\"]]",null,"generic"]]]' 2>&1)
-    if [[ "$tmp" == "curl"* ]]; then
-        print_network_failure "Google Gemini Location:\t\t" "$1" "gemini.google.com"
-        return
-    fi
-    local region=$(echo "$tmp" | grep K4WWud | json_query .[0][2] | grep -Eo '\[\[\\"(.*)\\",\\"S' )
-    echo -n -e "\r Google Gemini Location:\t\t${Font_Yellow}$(trim_chars "$region" 4 6)${Font_Suffix}\n"
+    print_google_location "Google Gemini Location:\t\t" "$1" "$Font_Yellow"
 }
 
 function AIUnlockTest_Copilot() {
