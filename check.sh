@@ -1,5 +1,4 @@
 #!/bin/bash
-shopt -s expand_aliases
 Font_Black="\033[30m"
 Font_Red="\033[31m"
 Font_Green="\033[32m"
@@ -46,7 +45,6 @@ while getopts ":I:M:EX:P:F:S:R:C:D:" optname; do
         ;;
         "C")
             Curl="$OPTARG"
-            alias curl=$Curl
         ;;
         "D")
             Dns="$OPTARG"
@@ -59,6 +57,9 @@ while getopts ":I:M:EX:P:F:S:R:C:D:" optname; do
     esac
     
 done
+
+# -C: curl program to run, optionally with its own arguments
+read -r -a curl_bin <<<"${Curl:-curl}"
 
 if [ -z "$iface" ]; then
     useNIC=""
@@ -129,9 +130,54 @@ checkGrep() {
 }
 checkGrep
 
+# Wraps curl while a check runs under run_check: if any response body is a Cloudflare WAF
+# block page, a marker is left in $CF_WAF_MARK so run_check can rewrite the check's result.
+curl() {
+    if [ -z "$CF_WAF_MARK" ]; then
+        command "${curl_bin[@]}" "$@"
+        return
+    fi
+    local args=() outfile="" tmpout="" rc
+    while [ $# -gt 0 ]; do
+        if [[ "$1" == "-o" || "$1" == "--output" ]] && [ $# -gt 1 ]; then
+            outfile="$2"
+            if [[ "$outfile" == "/dev/null" ]]; then
+                tmpout=$(mktemp)
+                args+=("$1" "$tmpout")
+            else
+                args+=("$1" "$2")
+            fi
+            shift 2
+            continue
+        fi
+        args+=("$1")
+        shift
+    done
+    if [ -n "$outfile" ]; then
+        command "${curl_bin[@]}" "${args[@]}"
+        rc=$?
+        if [ -n "$tmpout" ]; then
+            grep -q '<title>Attention Required! | Cloudflare</title>' "$tmpout" 2>/dev/null && echo 1 >"$CF_WAF_MARK"
+            rm -f "$tmpout"
+        elif [ -f "$outfile" ]; then
+            grep -q '<title>Attention Required! | Cloudflare</title>' "$outfile" 2>/dev/null && echo 1 >"$CF_WAF_MARK"
+        fi
+        return $rc
+    fi
+    local out
+    out=$(command "${curl_bin[@]}" "${args[@]}")
+    rc=$?
+    if [[ "$out" == *'<title>Attention Required! | Cloudflare</title>'* ]]; then
+        echo 1 >"$CF_WAF_MARK"
+    fi
+    printf '%s\n' "$out"
+    return $rc
+}
+
 curlArgs="$useNIC $usePROXY $xForward $resolve $dns --max-time 10"
 UA_Browser="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36 Edg/112.0.1722.64"
 UA_Dalvik="Dalvik/2.1.0 (Linux; U; Android 9; ALP-AL00 Build/HUAWEIALP-AL00)"
+UA_SecCHUA='"Chromium";v="112", "Microsoft Edge";v="112", "Not:A-Brand";v="99"'
 Media_Cookie=$(curl -s --retry 3 --max-time 10 "https://raw.githubusercontent.com/1-stream/RegionRestrictionCheck/main/cookies" &)
 IATACode=$(curl -s --retry 3 --max-time 10 "https://raw.githubusercontent.com/1-stream/RegionRestrictionCheck/main/reference/IATACode.txt" &)
 
@@ -280,50 +326,6 @@ print_network_failure() {
     else
         echo -n -e "\r ${1}${Font_Red}Failed (Network Connection${4})${Font_Suffix}\n"
     fi
-}
-
-# Wraps curl while a check runs under run_check: if any response body is a Cloudflare WAF
-# block page, a marker is left in $CF_WAF_MARK so run_check can rewrite the check's result.
-curl() {
-    if [ -z "$CF_WAF_MARK" ]; then
-        command curl "$@"
-        return
-    fi
-    local args=() outfile="" tmpout="" rc
-    while [ $# -gt 0 ]; do
-        if [[ "$1" == "-o" || "$1" == "--output" ]] && [ $# -gt 1 ]; then
-            outfile="$2"
-            if [[ "$outfile" == "/dev/null" ]]; then
-                tmpout=$(mktemp)
-                args+=("$1" "$tmpout")
-            else
-                args+=("$1" "$2")
-            fi
-            shift 2
-            continue
-        fi
-        args+=("$1")
-        shift
-    done
-    if [ -n "$outfile" ]; then
-        command curl "${args[@]}"
-        rc=$?
-        if [ -n "$tmpout" ]; then
-            grep -q '<title>Attention Required! | Cloudflare</title>' "$tmpout" 2>/dev/null && echo 1 >"$CF_WAF_MARK"
-            rm -f "$tmpout"
-        elif [ -f "$outfile" ]; then
-            grep -q '<title>Attention Required! | Cloudflare</title>' "$outfile" 2>/dev/null && echo 1 >"$CF_WAF_MARK"
-        fi
-        return $rc
-    fi
-    local out
-    out=$(command curl "${args[@]}")
-    rc=$?
-    if [[ "$out" == *'<title>Attention Required! | Cloudflare</title>'* ]]; then
-        echo 1 >"$CF_WAF_MARK"
-    fi
-    printf '%s\n' "$out"
-    return $rc
 }
 
 # Runs a check function; if any of its requests hit a Cloudflare WAF block page,
@@ -752,7 +754,12 @@ function MediaUnlockTest_HuluJP() {
 }
 
 function MediaUnlockTest_MyTVSuper() {
-    local result=$(curl $curlArgs -s -${1} --max-time 10 "https://www.mytvsuper.com/api/auth/getSession/self/" 2>&1 | json_query . | grep 'region' | awk '{print $2}' | tr -d ",")
+    local tmpresult=$(curl $curlArgs -sS -${1} --max-time 10 "https://www.mytvsuper.com/api/auth/getSession/self/" 2>&1)
+    if [[ -z "$tmpresult" || "$tmpresult" == "curl"* ]]; then
+        print_network_failure "MyTVSuper:\t\t\t\t" "$1" "www.mytvsuper.com"
+        return
+    fi
+    local result=$(echo "$tmpresult" | json_query . | grep 'region' | awk '{print $2}' | tr -d ",")
 
     if [[ "$result" == "1" ]]; then
         echo -n -e "\r MyTVSuper:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
@@ -2485,7 +2492,7 @@ function MediaUnlockTest_ESPNPlus() {
 
 function MediaUnlockTest_Stan() {
     local tmpresult=$(curl $curlArgs -${1} -X POST -sS --max-time 10 "https://api.stan.com.au/login/v1/sessions/web/account" 2>&1)
-    if [ -z "$tmpresult" ]; then
+    if [[ -z "$tmpresult" || "$tmpresult" == "curl"* ]]; then
         print_network_failure "Stan:\t\t\t\t\t" "$1" "api.stan.com.au"
         return
     fi
@@ -2519,12 +2526,14 @@ function MediaUnlockTest_Binge() {
 }
 
 function MediaUnlockTest_Docplay() {
-    local result=$(curl $curlArgs -${1} -Ss -o /dev/null -L --max-time 10 -w '%{url_effective}\n' "https://www.docplay.com/subscribe" 2>&1 | grep 'geoblocked')
-    if [[ "$result" == "curl"* ]]; then
+    local tmpresult=$(curl $curlArgs -${1} -Ss -o /dev/null -L --max-time 10 -w '%{url_effective}\n' "https://www.docplay.com/subscribe" 2>&1)
+    if [[ "$tmpresult" == *"curl: ("* ]]; then
         print_network_failure "Docplay:\t\t\t\t" "$1" "www.docplay.com"
         isKayoSportsOK=2
         return
-    elif [ -n "$result" ]; then
+    fi
+    local result=$(echo "$tmpresult" | grep 'geoblocked')
+    if [ -n "$result" ]; then
         echo -n -e "\r Docplay:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
         isKayoSportsOK=0
         return
@@ -2580,7 +2589,7 @@ function MediaUnlockTest_NeonTV() {
     local NeonHeader=$(echo "$Media_Cookie" | sed -n '12p')
     local NeonContent=$(echo "$Media_Cookie" | sed -n '13p')
     local tmpresult=$(curl $curlArgs -${1} -sS -X POST "https://api.neontv.co.nz/api/client/gql?" -H "content-type: application/json" -H "$NeonHeader" -d "$NeonContent" 2>&1)
-    if [ -z "$tmpresult" ]; then
+    if [[ -z "$tmpresult" || "$tmpresult" == "curl"* ]]; then
         print_network_failure "Neon TV:\t\t\t\t" "$1" "api.neontv.co.nz"
         return
     fi
@@ -2597,7 +2606,7 @@ function MediaUnlockTest_NeonTV() {
 
 function MediaUnlockTest_SkyGONZ() {
     local result=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} -sSL --max-time 10  --output /dev/null -w %{http_code} "https://linear-s.stream.skyone.co.nz/sky-sport-1.mpd" 2>&1)
-    if [[ "$result" == "curl"* ]]; then
+    if [[ "$result" == "000"* || "$result" == "curl"* ]]; then
         print_network_failure "SkyGo NZ:\t\t\t\t" "$1" "linear-s.stream.skyone.co.nz"
         return
     fi
@@ -2672,7 +2681,7 @@ function MediaUnlockTest_SBSonDemand() {
 
 function MediaUnlockTest_ABCiView() {
     local tmpresult=$(curl $curlArgs -${1} -sS --max-time 10 "https://api.iview.abc.net.au/v2/show/abc-kids-live-stream/video/LS1604H001S00?embed=highlightVideo,selectedSeries" 2>&1)
-    if [ -z "$tmpresult" ]; then
+    if [[ -z "$tmpresult" || "$tmpresult" == "curl"* ]]; then
         print_network_failure "ABC iView:\t\t\t\t" "$1" "api.iview.abc.net.au"
         return
     fi
@@ -2688,11 +2697,13 @@ function MediaUnlockTest_ABCiView() {
 }
 
 function MediaUnlockTest_Channel9() {
-    local result=$(curl $curlArgs -${1} -Ss -o /dev/null -L --max-time 10 -w '%{url_effective}\n' "https://login.nine.com.au" 2>&1 | grep 'geoblock')
-    if [[ "$result" == "curl"* ]]; then
+    local tmpresult=$(curl $curlArgs -${1} -Ss -o /dev/null -L --max-time 10 -w '%{url_effective}\n' "https://login.nine.com.au" 2>&1)
+    if [[ "$tmpresult" == *"curl: ("* ]]; then
         print_network_failure "Channel 9:\t\t\t\t" "$1" "login.nine.com.au"
         return
-    elif [ -n "$result" ]; then
+    fi
+    local result=$(echo "$tmpresult" | grep 'geoblock')
+    if [ -n "$result" ]; then
         echo -n -e "\r Channel 9:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
         return
     else
@@ -2866,7 +2877,7 @@ function MediaUnlockTest_MyVideo() {
 
 function MediaUnlockTest_7plus() {
     local result1=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -fsL --write-out %{http_code} --output /dev/null --max-time 10 "https://7plus-sevennetwork.akamaized.net/media/v1/dash/live/cenc/5303576322001/68dca38b-85d7-4dae-b1c5-c88acc58d51c/f4ea4711-514e-4cad-824f-e0c87db0a614/225ec0a0-ef18-4b7c-8fd6-8dcdd16cf03a/1x/segment0.m4f?akamai_token=exp=1672500385~acl=/media/v1/dash/live/cenc/5303576322001/68dca38b-85d7-4dae-b1c5-c88acc58d51c/f4ea4711-514e-4cad-824f-e0c87db0a614/*~hmac=800e1e1d1943addf12b71339277c637c7211582fe12d148e486ae40d6549dbde" 2>&1)
-    if [[ "$GetPlayURL" == "curl"* ]]; then
+    if [[ "$result1" == "000" ]]; then
         print_network_failure "7plus:\t\t\t\t\t" "$1" "7plus-sevennetwork.akamaized.net"
         return
     fi
@@ -2952,7 +2963,11 @@ function MediaUnlockTest_J:COM_ON_DEMAND() {
 }
 
 function MediaUnlockTest_music.jp() {
-	local result=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sL --max-time 10 "https://overseaauth.music-book.jp/globalIpcheck.js" 2>&1)
+	local result=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 "https://overseaauth.music-book.jp/globalIpcheck.js" 2>&1)
+	if [[ "$result" == "curl"* ]]; then
+		print_network_failure "music.jp:\t\t\t\t" "$1" "overseaauth.music-book.jp"
+		return
+	fi
 	if [ -n "$result" ]; then
         echo -n -e "\r music.jp:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
     else
@@ -3153,6 +3168,9 @@ function MediaUnlockTest_CoupangPlay() {
 
 function MediaUnlockTest_NaverTV() {
     local ts=$(date +%s%3N)
+    if ! [[ "$ts" =~ ^[0-9]+$ ]]; then
+        ts="$(date +%s)000"
+    fi
     local base_url="https://apis.naver.com/"
     local key="nbxvs5nwNG9QKEWK0ADjYA4JZoujF4gHcIwvoCxFTPAeamq5eemvt5IWAYXxrbYM"
     local sign_text="https://apis.naver.com/now_web2/now_web_api/v1/clips/31030608/play-info${ts}"
@@ -3838,7 +3856,7 @@ function MediaUnlockTest_Tiktok() {
 
 function MediaUnlockTest_StarhubTVPlus() {
     local result=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} -sSL --max-time 10  --output /dev/null -w %{http_code} "https://ucdn.starhubgo.com/bpk-tv/HubSensasiHD/output/manifest.mpd" 2>&1)
-    if [[ "$result" == "curl"* ]]; then
+    if [[ "$result" == "000"* || "$result" == "curl"* ]]; then
         print_network_failure "Starhub TV+:\t\t\t\t" "$1" "ucdn.starhubgo.com"
         return
     fi
@@ -4123,9 +4141,13 @@ function AIUnlockTest_Copilot() {
 }
 
 function AIUnlockTest_Claude(){
-    local result=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -s -o /dev/null -L --max-time 10 -w '%{url_effective}%{http_code}\n' "https://claude.ai/" 2>&1 | grep -E 'unavailable|000')
+    local result=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -s -o /dev/null -L --max-time 10 -w '%{url_effective}%{http_code}\n' "https://claude.ai/" 2>&1)
+    if [[ "$result" == *"000" ]]; then
+        print_network_failure "Claude:\t\t\t\t" "$1" "claude.ai"
+        return
+    fi
 
-    if [ -n "$result" ]; then
+    if [[ "$result" == *unavailable* ]]; then
         echo -n -e "\r Claude:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
         return
     else
@@ -4217,8 +4239,8 @@ function MediaUnlockTest_mora() {
 
 function MediaUnlockTest_DAnimeStore(){
     local tmpresult=$(curl $curlArgs -${1} -sSL --max-time 10 -sL 'https://animestore.docomo.ne.jp/animestore/reg_pc' 2>&1)
-    if [ -z "$tmpresult" ]; then
-        echo -n -e "\r D Anime Store:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
+    if [[ -z "$tmpresult" || "$tmpresult" == "curl"* ]]; then
+        print_network_failure "D Anime Store:\t\t\t\t" "$1" "animestore.docomo.ne.jp"
         return
     fi
 
@@ -4948,7 +4970,7 @@ function AF_UnlockTest() {
         # MediaUnlockTest_ParamountPlus &
     )
     wait
-    local array=("DSTV:" "Showmax:" "Viu.com:")
+    local array=("DStv:" "Showmax:" "Viu.com:")
     echo_Result ${result} ${array}
     echo "======================================="
 }
