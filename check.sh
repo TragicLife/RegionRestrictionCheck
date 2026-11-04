@@ -684,7 +684,7 @@ function MediaUnlockTest_DisneyPlus() {
         echo -n -e "\r Disney+:\t\t\t\t${Font_Green}Yes (Region: JP)${Font_Suffix}\n"
         return
     elif [ -n "$region" ] && [[ "$inSupportedLocation" == "false" ]] && [ -z "$isUnavailable" ]; then
-        echo -n -e "\r Disney+:\t\t\t\t${Font_Yellow}Available For [Disney+ $region] Soon${Font_Suffix}\n"
+        echo -n -e "\r Disney+:\t\t\t\t${Font_Yellow}Unsupported (Region: $region)${Font_Suffix}\n"
         return
     elif [ -n "$region" ] && [ -n "$isUnavailable" ]; then
         echo -n -e "\r Disney+:\t\t\t\t${Font_Red}No  (Unavailable)${Font_Suffix}\n"
@@ -1078,7 +1078,7 @@ function MediaUnlockTest_iQYI_Region() {
     fi
     if [ -n "$result" ]; then
         if [[ "$result" == "intl" ]]; then
-            echo -n -e "\r iQyi Oversea:\t\t\t\t${Font_Red}No  (Region: $(to_upper "$region"))${Font_Suffix}\n"
+            echo -n -e "\r iQyi Oversea:\t\t\t\t${Font_Yellow}Unsupported (Region: $(to_upper "$region"))${Font_Suffix}\n"
             return
         else
             echo -n -e "\r iQyi Oversea:\t\t\t\t${Font_Green}Yes (Region: $(to_upper "$region"))${Font_Suffix}\n"
