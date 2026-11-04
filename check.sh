@@ -2004,7 +2004,8 @@ function MediaUnlockTest_MoviStarPlus() {
 function MediaUnlockTest_Sky_CH() {
     local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS -o /dev/null -IL -X GET --max-time 10 -w '%{url_effective}\n' "https://sky.ch/" 2>&1)
     if [[ "$tmpresult" == "curl"* ]]; then
-        print_network_failure "SKY CH:\t\t\t\t" "$1" "sky.ch"
+        # sky.ch has an AAAA record but only redirects to www.sky.ch, which is IPv4-only
+        print_network_failure "SKY CH:\t\t\t\t" "$1" "www.sky.ch"
         return
     fi
     local result=$(echo $tmpresult | grep 'out-of-country')
