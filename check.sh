@@ -591,20 +591,16 @@ function MediaUnlockTest_Kancolle() {
 
 function MediaUnlockTest_BBCiPLAYER() {
     local tmpresult=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} -fsL --max-time 10 "https://open.live.bbc.co.uk/mediaselector/6/select/version/2.0/mediaset/pc/vpid/bbc_one_london/format/json/jsfunc/JS_callbacks0" 2>&1)
-    if [ "${tmpresult}" = "000" ]; then
+    if [ -z "$tmpresult" ]; then
         print_network_failure "BBC iPLAYER:\t\t\t\t" "$1" "open.live.bbc.co.uk"
         return
     fi
 
-    if [ -n "$tmpresult" ]; then
-        result=$(echo $tmpresult | grep 'geolocation')
-        if [ -n "$result" ]; then
-            echo -n -e "\r BBC iPLAYER:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
-        else
-            echo -n -e "\r BBC iPLAYER:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
-        fi
+    result=$(echo $tmpresult | grep 'geolocation')
+    if [ -n "$result" ]; then
+        echo -n -e "\r BBC iPLAYER:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
     else
-        echo -n -e "\r BBC iPLAYER:\t\t\t\t${Font_Red}Failed${Font_Suffix}\n"
+        echo -n -e "\r BBC iPLAYER:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
     fi
 }
 
@@ -1888,23 +1884,6 @@ function MediaUnlockTest_EPIX() {
         return
     else
         echo -n -e "\r MGM+:\t\t\t\t\t${Font_Red}Failed${Font_Suffix}\n"
-        return
-    fi
-
-}
-
-function MediaUnlockTest_NLZIET() {
-    local tmpresult=$(curl $curlArgs -${1} -s --max-time 10 'https://api.nlziet.nl/v7/stream/handshake/Widevine/Dash/VOD/rzIL9rb-TkSn-ek_wBmvaw?playerName=BitmovinWeb'   -H 'accept: application/json, text/plain, */*'   -H 'accept-language: zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6'   -H 'authorization: Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6IkM4M0YzQUFGOTRCOTM0ODA2NkQwRjZDRTNEODhGQkREIiwidHlwIjoiYXQrand0In0.eyJuYmYiOjE3MTIxMjY0NTMsImV4cCI6MTcxMjE1NTI0OCwiaXNzIjoiaHR0cHM6Ly9pZC5ubHppZXQubmwiLCJhdWQiOiJhcGkiLCJjbGllbnRfaWQiOiJ0cmlwbGUtd2ViIiwic3ViIjoiMDAzMTZiNGEtMDAwMC0wMDAwLWNhZmUtZjFkZTA1ZGVlZmVlIiwiYXV0aF90aW1lIjoxNzEyMTI2NDUzLCJpZHAiOiJsb2NhbCIsImVtYWlsIjoibXVsdGkuZG5zMUBvdXRsb29rLmNvbSIsInVzZXJJZCI6IjMyMzg3MzAiLCJjdXN0b21lcklkIjoiMCIsImRldmljZUlkZW50aWZpZXIiOiJJZGVudGl6aWV0LTI0NWJiNmYzLWM2ZjktNDNjZS05ODhmLTgxNDc2OTcwM2E5OCIsImV4dGVybmFsVXNlcklkIjoiZTM1ZjdkMzktMjQ0ZC00ZTkzLWFkOTItNGFjYzVjNGY0NGNlIiwicHJvZmlsZUlkIjoiMjdDMzM3RjktOTRDRS00NjBDLTlBNjktMTlDNjlCRTYwQUIzIiwicHJvZmlsZUNvbG9yIjoiRkY0MjdDIiwicHJvZmlsZVR5cGUiOiJBZHVsdCIsIm5hbWUiOiJTdHJlYW1pbmciLCJqdGkiOiI4Q0M1QzYzNkJGRjg3MEE2REJBOERBNUMwQTk0RUZDRiIsImlhdCI6MTcxMjEyNjQ1Mywic2NvcGUiOlsiYXBpIiwib3BlbmlkIl0sImFtciI6WyJwcm9maWxlIiwicHdkIl19.bk-ziFPJM00bpE7TcgPmIYFFx-2Q5N3BkUzEvQ_dDMK9O1F9f7DEe-Qzmnb5ym7ChlnXwrCV3QyOOA24hu_gCrlNlD7-vI3XGZR-54zFD-F7cRDOoL-1-iO_10tmgwb5Io-svY0bn0EDYKeRxYYBi0w_3bFVFDM2CxxA6tWeBYIfN5rCSzBHd3RPPjYtqX-sogyh_5W_7KJ83GK5kpsywT3mz8q7Cs1mtKs9QA1-o01N0RvTxZAcfzsHg3-qGgLnvaAuZ_XqRK9kLWqJWeJTWKWtUI6OlPex22sY3keKFpfZnUtFv-BvkCM6tvbIlMZAClk3lhI8rMFAWDpUcbcS3w'   -H 'nlziet-appname: WebApp'   -H 'nlziet-appversion: 5.43.24'   -H 'origin: https://app.nlziet.nl'   -H 'referer: https://app.nlziet.nl/'  2>&1)
-    local isBlocked=$(echo $tmpresult | grep 'CountryNotAllowed')
-    local isOK=$(echo $tmpresult | grep 'streamSessionId')
-    if [ -n "$isBlocked" ]; then
-        echo -n -e "\r NLZIET:\t\t\t\t${Font_Red}No${Font_Suffix}\n"
-        return
-    elif [ -n "$isOK" ]; then
-        echo -n -e "\r NLZIET:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
-        return
-    else
-        echo -n -e "\r NLZIET:\t\t\t\t${Font_Red}Failed${Font_Suffix}\n"
         return
     fi
 
@@ -4188,7 +4167,10 @@ function AIUnlockTest_Claude(){
 function MediaUnlockTest_RakutenMagazine() {
     local result=$(curl $curlArgs -${1} -sL --write-out %{http_code} --output /dev/null --max-time 10 "https://data-cloudauthoring.magazine.rakuten.co.jp/rem_repository/////////.key" 2>&1)
 
-    if [[ "$result" == "403" ]]; then
+    if [[ "$result" == "000" ]]; then
+        print_network_failure "Rakuten MAGAZINE:\t\t\t" "$1" "data-cloudauthoring.magazine.rakuten.co.jp"
+        return
+    elif [[ "$result" == "403" ]]; then
         echo -n -e "\r Rakuten MAGAZINE:\t\t\t${Font_Red}No${Font_Suffix}\n"
         return
     elif [[ "$result" == "404" ]]; then
@@ -4285,7 +4267,14 @@ function MediaUnlockTest_DAnimeStore(){
 }
 
 function MediaUnlockTest_EroGameSpace(){
-    local result=$(curl $usePROXY $xForward -${1} -sSL --max-time 3  "https://erogamescape.org" 2>/dev/null | grep '18歳')
+    local tmpresult=$(curl $usePROXY $xForward -${1} -sSL --max-time 3  "https://erogamescape.org" 2>&1)
+    # The site silently drops unsupported IPs, so a timeout (curl exit 28) means No.
+    if [[ "$tmpresult" == "curl"* && "$tmpresult" != "curl: (28)"* ]]; then
+        print_network_failure "EroGameSpace:\t\t\t\t" "$1" "erogamescape.org"
+        return
+    fi
+
+    local result=$(echo "$tmpresult" | grep '18歳')
     if [ -n "$result" ]; then
       echo -n -e "\r EroGameSpace:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
         return
@@ -4679,7 +4668,6 @@ function EU_UnlockTest() {
     echo_Result ${result} ${array}
     ShowRegion NL
     local result=$(
-    run_check MediaUnlockTest_NLZIET ${1} &
     run_check MediaUnlockTest_videoland ${1} &
     run_check MediaUnlockTest_NPO_Start_Plus ${1} &
     # MediaUnlockTest_HBO_Spain ${1}
@@ -4690,7 +4678,7 @@ function EU_UnlockTest() {
     run_check MediaUnlockTest_Amediateka ${1} &
     )
     wait
-    local array=("NLZIET:" "videoland:" "NPO Start Plus:")
+    local array=("videoland:" "NPO Start Plus:")
     echo_Result ${result} ${array}
     ShowRegion ES
     echo "$result" | grep "Movistar+:"
