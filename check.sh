@@ -375,7 +375,7 @@ print_network_failure() {
 }
 
 # Runs a check function; if any of its requests hit a Cloudflare WAF block page,
-# its result lines are replaced with "Blocked by WAF".
+# its result lines are replaced with "Banned by WAF".
 # A check that exceeds $CHECK_TIMEOUT seconds is killed and named on stderr: every test
 # block waits for all of its checks, so one stuck process would otherwise freeze the
 # script for good. The output goes to a file so that nothing left behind by a killed
@@ -406,7 +406,7 @@ run_check() {
         local line
         while IFS= read -r line; do
             if [[ "$line" == *$'\033'* ]]; then
-                printf '%s%b\n' "${line%%$'\033'*}" "${Font_Red}No  (Blocked by WAF)${Font_Suffix}"
+                printf '%s%b\n' "${line%%$'\033'*}" "${Font_Red}No  (Banned by WAF)${Font_Suffix}"
             elif [ -n "$line" ]; then
                 printf '%s\n' "$line"
             fi
@@ -4202,6 +4202,45 @@ function AIUnlockTest_Copilot() {
     fi
 }
 
+function AIUnlockTest_Grok() {
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSi --max-time 10 -w '\n%{http_code}' "https://grok.com/" 2>&1 | keep_matches '^[Xx]-[Cc]ountry-[Cc]ode: *[A-Za-z0-9]+|^[0-9]{3}$|<title>(Just a moment|Attention Required)|not available in your region')
+    if [[ "$tmpresult" == "curl"* ]]; then
+        print_network_failure "Grok:\t\t\t\t\t" "$1" "grok.com"
+        return
+    fi
+    local httpcode=$(echo "$tmpresult" | grep -E '^[0-9]{3}$' | tail -n 1)
+    local region=$(echo "$tmpresult" | grep -i '^x-country-code:' | tail -n 1 | awk '{print $2}')
+    region=$(to_upper "$region")
+    if [[ "$region" == "T1" ]]; then
+        region="Tor"
+    fi
+    local regionInfo="Unknown Region"
+    if [ -n "$region" ]; then
+        regionInfo="Region: ${region}"
+    fi
+    if [[ "$httpcode" == "429" ]]; then
+        echo -n -e "\r Grok:\t\t\t\t\t${Font_Yellow}Rate Limited (${regionInfo})${Font_Suffix}\n"
+        return
+    fi
+    if [[ "$tmpresult" == *"<title>"* ]]; then
+        echo -n -e "\r Grok:\t\t\t\t\t${Font_Red}No  (Banned by WAF)${Font_Suffix}\n"
+        return
+    fi
+    if [[ "$tmpresult" == *"not available in your region"* ]] || [[ "$httpcode" == "403" ]] || [[ "$httpcode" == "451" ]]; then
+        echo -n -e "\r Grok:\t\t\t\t\t${Font_Red}No  (${regionInfo})${Font_Suffix}\n"
+        return
+    fi
+    if [[ "$httpcode" != "200" ]]; then
+        echo -n -e "\r Grok:\t\t\t\t\t${Font_Red}Failed (Unexpected Result: ${httpcode})${Font_Suffix}\n"
+        return
+    fi
+    if [ -z "$region" ]; then
+        echo -n -e "\r Grok:\t\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
+        return
+    fi
+    echo -n -e "\r Grok:\t\t\t\t\t${Font_Green}Yes (${regionInfo})${Font_Suffix}\n"
+}
+
 function AIUnlockTest_Claude(){
     local result=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -s -o /dev/null -L --max-time 10 -w '%{url_effective}%{http_code}\n' "https://claude.ai/" 2>&1)
     if [[ "$result" == *"000" ]]; then
@@ -4320,7 +4359,7 @@ function MediaUnlockTest_DAnimeStore(){
         return
     fi
     debug_log "$tmpresult"
-    echo -n -e "\r D Anime Store:\t\t\t\t${Font_Red}No  (Blocked by WAF)${Font_Suffix}\n"
+    echo -n -e "\r D Anime Store:\t\t\t\t${Font_Red}No  (Banned by WAF)${Font_Suffix}\n"
 }
 
 function MediaUnlockTest_EroGameSpace(){
@@ -4503,48 +4542,54 @@ function MediaUnlockTest_Reddit() {
     echo -n -e "\r Reddit:\t\t\t\t${Font_Red}Failed (Unexpected Result: ${httpcode})${Font_Suffix}\n"
 }
 
+# Print the country grok.com derives from the IP, as sent in its x-country-code header.
+# $1: IP version
+get_grok_country() {
+    curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSI -X GET --max-time 10 "https://grok.com/" 2>/dev/null | tr -d '\r' | grep -i '^x-country-code:' | head -n 1 | awk '{print $2}'
+}
+
 function MediaUnlockTest_X() {
-    local trace=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS --max-time 10 -w '\n%{http_code}' "https://x.com/cdn-cgi/trace" 2>&1)
-    if [[ "$trace" == "curl"* ]]; then
-        print_network_failure "X (formerly Twitter):\t\t\t" "$1" "x.com"
-        return
-    fi
-    local tracecode=${trace##*$'\n'}
-    local region=$(echo "$trace" | grep '^loc=' | cut -d= -f2 | tr -d '\r')
-    if [[ "$tracecode" == "429" ]]; then
-        echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Yellow}Rate Limited${Font_Suffix}\n"
-        return
-    fi
-    if [[ "$tracecode" != "200" ]] || [ -z "$region" ]; then
-        echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Red}Failed (Unknown Region)${Font_Suffix}\n"
-        return
-    fi
     local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS --max-time 10 -w '\n%{http_code}' "https://x.com/" 2>&1)
     if [[ "$tmpresult" == "curl"* ]]; then
         print_network_failure "X (formerly Twitter):\t\t\t" "$1" "x.com"
         return
     fi
     local httpcode=${tmpresult##*$'\n'}
-    if [[ "$httpcode" == "429" ]]; then
-        echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Yellow}Rate Limited (Region: $(to_upper "$region"))${Font_Suffix}\n"
-        return
+    # X's web app receives its detected country in window.__INITIAL_DATA__.
+    # A block page does not carry it, so fall back to Grok, which is run by the same company.
+    local region=$(echo "$tmpresult" | sed -nE 's/.*"appMetadata":\{[^}]*"country":"([A-Za-z]{2})".*/\1/p' | head -n 1)
+    if [ -z "$region" ]; then
+        region=$(get_grok_country "$1")
     fi
-    if [[ "$httpcode" == "403" ]] || [[ "$httpcode" == "451" ]] || [[ " CN IR MM KP RU TM " == *" $(to_upper "$region") "* ]]; then
-        echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Red}No  (Region: $(to_upper "$region"))${Font_Suffix}\n"
+    region=$(to_upper "$region")
+    if [[ "$region" == "T1" ]]; then
+        region="Tor"
+    fi
+    local regionInfo="Unknown Region"
+    if [ -n "$region" ]; then
+        regionInfo="Region: ${region}"
+    fi
+    if [[ "$httpcode" == "429" ]]; then
+        echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Yellow}Rate Limited (${regionInfo})${Font_Suffix}\n"
         return
     fi
     if echo "$tmpresult" | grep -qiE 'attention required|cf-chl|checking your browser|just a moment|access denied|request blocked|unusual traffic'; then
         echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Red}No  (Banned by WAF)${Font_Suffix}\n"
         return
     fi
+    if [[ "$httpcode" == "403" ]] || [[ "$httpcode" == "451" ]] || [[ " CN IR MM KP RU TM " == *" ${region} "* ]]; then
+        echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Red}No  (${regionInfo})${Font_Suffix}\n"
+        return
+    fi
     if [[ "$httpcode" -lt 200 ]] || [[ "$httpcode" -ge 400 ]]; then
         echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Red}Failed (Unexpected Result: ${httpcode})${Font_Suffix}\n"
         return
     fi
-    if [[ "$region" == "T1" ]]; then
-        region="Tor"
+    if [ -z "$region" ]; then
+        echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Red}Failed (Unknown Region)${Font_Suffix}\n"
+        return
     fi
-    echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Green}Yes (Region: $(to_upper "$region"))${Font_Suffix}\n"
+    echo -n -e "\r X (formerly Twitter):\t\t\t${Font_Green}Yes (${regionInfo})${Font_Suffix}\n"
 }
 
 function MediaUnlockTest_Apple() {
@@ -5078,9 +5123,10 @@ function AI_UnlockTest() {
     AIUnlockTest_Gemini_location ${1} &
     AIUnlockTest_Copilot ${1} &
     AIUnlockTest_Claude ${1} &
+    run_check AIUnlockTest_Grok ${1} &
     )
     wait
-    local array=("ChatGPT" "Copilot" "Gemini" "Sora:" "Claude:" )
+    local array=("ChatGPT" "Copilot" "Gemini" "Sora:" "Claude:" "Grok:" )
     echo_Result ${result} ${array}
 
     echo "======================================="
