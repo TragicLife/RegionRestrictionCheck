@@ -60,6 +60,14 @@ done
 
 # -C: curl program to run, optionally with its own arguments
 read -r -a curl_bin <<<"${Curl:-curl}"
+# The full path lets the curl() wrapper below call the program without "command":
+# in a background job, bash 3.2 replaces the shell with the program "command" runs,
+# which ends the check right there.
+if ! curl_path=$(type -P "${curl_bin[0]}"); then
+    echo -e "${Font_Red}${curl_bin[0]} is required but was not found, please install it and try again.${Font_Suffix}" >&2
+    exit 1
+fi
+curl_bin[0]="$curl_path"
 
 if [ -z "$iface" ]; then
     useNIC=""
@@ -134,7 +142,7 @@ checkGrep
 # block page, a marker is left in $CF_WAF_MARK so run_check can rewrite the check's result.
 curl() {
     if [ -z "$CF_WAF_MARK" ]; then
-        command "${curl_bin[@]}" "$@"
+        "${curl_bin[@]}" "$@"
         return
     fi
     local args=() outfile="" tmpout="" rc
@@ -167,7 +175,7 @@ curl() {
         done
     fi
     if [ -n "$outfile" ]; then
-        command "${curl_bin[@]}" "${args[@]}"
+        "${curl_bin[@]}" "${args[@]}"
         rc=$?
         if [ -n "$tmpout" ]; then
             grep -q '<title>Attention Required! | Cloudflare</title>' "$tmpout" 2>/dev/null && echo 1 >"$CF_WAF_MARK"
@@ -178,7 +186,7 @@ curl() {
         return $rc
     fi
     local out
-    out=$(command "${curl_bin[@]}" "${args[@]}")
+    out=$("${curl_bin[@]}" "${args[@]}")
     rc=$?
     if [[ "$out" == *'<title>Attention Required! | Cloudflare</title>'* ]]; then
         echo 1 >"$CF_WAF_MARK"
@@ -356,12 +364,32 @@ print_network_failure() {
 
 # Runs a check function; if any of its requests hit a Cloudflare WAF block page,
 # its result lines are replaced with "Blocked by WAF".
+# A check that exceeds $CHECK_TIMEOUT seconds is killed and named on stderr: every test
+# block waits for all of its checks, so one stuck process would otherwise freeze the
+# script for good. The output goes to a file so that nothing left behind by a killed
+# check can keep the block's pipe open. The limit leaves room for the slowest check
+# (6 requests of 10s each).
 # $1: check function, remaining arguments are passed through (usually the IP version)
 run_check() {
     local CF_WAF_MARK
     CF_WAF_MARK=$(mktemp) || { "$@"; return; }
-    local output
-    output=$("$@")
+    local output output_file check_pid deadline
+    output_file=$(mktemp) || { rm -f "$CF_WAF_MARK"; "$@"; return; }
+    "$@" >"$output_file" &
+    check_pid=$!
+    deadline=$((SECONDS + ${CHECK_TIMEOUT:-90}))
+    while kill -0 "$check_pid" 2>/dev/null; do
+        if [ "$SECONDS" -ge "$deadline" ]; then
+            kill -9 "$check_pid" 2>/dev/null
+            echo -e "\r ${Font_Red}Timed out, skipped: ${1}${Font_Suffix}" >&2
+            break
+        fi
+        # Not every sleep takes fractions, and failing here would make this a busy loop.
+        sleep 0.5 2>/dev/null || sleep 1
+    done
+    wait "$check_pid" 2>/dev/null
+    output=$(cat "$output_file")
+    rm -f "$output_file"
     if [ -s "$CF_WAF_MARK" ]; then
         local line
         while IFS= read -r line; do
@@ -5436,4 +5464,7 @@ function RunScript() {
     fi
 }
 wait
+# Background checks ignore SIGINT, so Ctrl+C has to stop them from here. Bash runs this
+# only once the test block it is waiting for ends, which run_check keeps bounded.
+trap "trap '' TERM; kill 0 2>/dev/null; exit 130" INT TERM
 RunScript
