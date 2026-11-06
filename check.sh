@@ -185,13 +185,14 @@ curl() {
         fi
         return $rc
     fi
-    local out
-    out=$("${curl_bin[@]}" "${args[@]}")
+    # A file, not a variable: see keep_matches.
+    local body
+    body=$(mktemp) || { "${curl_bin[@]}" "${args[@]}"; return; }
+    "${curl_bin[@]}" "${args[@]}" >"$body"
     rc=$?
-    if [[ "$out" == *'<title>Attention Required! | Cloudflare</title>'* ]]; then
-        echo 1 >"$CF_WAF_MARK"
-    fi
-    printf '%s\n' "$out"
+    grep -qF '<title>Attention Required! | Cloudflare</title>' "$body" 2>/dev/null && echo 1 >"$CF_WAF_MARK"
+    cat "$body"
+    rm -f "$body"
     return $rc
 }
 
@@ -324,6 +325,17 @@ trim_chars() {
 # $1: string
 to_upper() {
     printf '%s' "$1" | tr 'a-z' 'A-Z'
+}
+
+# Reduce a response on stdin to the parts a check needs. Use this for any page over a few
+# hundred KB: on Termux, bash takes about 10s for one [[ == ]] or ${var##...} on a 1MB
+# string and over a minute on 2MB, even for a plain prefix test, while grep takes
+# milliseconds. Do the same before sed on a large page, as some pages have lines of over
+# 2MB. "curl: ..." error lines are always kept, as checks look for them. Each match is
+# printed on its own line.
+# $1: extended regular expression
+keep_matches() {
+    grep -Eo "^curl: .*|$1"
 }
 
 # Print the first IPv4/IPv6 address of a host using the system resolver.
@@ -640,15 +652,15 @@ function MediaUnlockTest_BBCiPLAYER() {
 }
 
 function MediaUnlockTest_Netflix() {
-    local tmpresult1=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 --tlsv1.3 "https://www.netflix.com/title/81280792" 2>&1)
-    local tmpresult2=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 --tlsv1.3 "https://www.netflix.com/title/70143836" 2>&1)
+    local tmpresult1=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 --tlsv1.3 "https://www.netflix.com/title/81280792" 2>&1 | keep_matches 'og:video|"requestCountry":\{[^}]*\}')
+    local tmpresult2=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -SsL --max-time 10 --tlsv1.3 "https://www.netflix.com/title/70143836" 2>&1 | keep_matches 'og:video|"requestCountry":\{[^}]*\}')
     if [[ "$tmpresult1" == "curl"* ]] || [[ "$tmpresult2" == "curl"* ]]; then
         print_network_failure "Netflix:\t\t\t\t" "$1" "www.netflix.com"
         return
     fi
     local result1=$( echo "$tmpresult1" | grep "og:video" )
     local result2=$( echo "$tmpresult2" | grep "og:video" )
-    local region1=$( echo -e $(echo "$tmpresult1" | grep 'netflix.reactContext' | awk -F= '{print $2}' | awk -F\; '{print $1}') | tr -d '\000-\037\177' | sed 's/\^[^$]*\$//g' | json_query '.models.geo.data.requestCountry.id' | tr -d '"' )
+    local region1=$(echo "$tmpresult1" | grep -o '"id":"[A-Z]\{2\}"' | head -n 1 | cut -d'"' -f4)
 
     if [ -n "$result1" ] || [ -n "$result2" ]; then
         echo -n -e "\r Netflix:\t\t\t\t${Font_Green}Yes (Region: ${region1})${Font_Suffix}\n"
@@ -1036,7 +1048,7 @@ function MediaUnlockTest_HBOMax() {
     local tmpresult=$(curl $curlArgs -${1} -sS "https://default.$tenant-$homeMarket.$env.$domain/users/me" -H 'x-disco-client: WEB:10.15.7:dotcom-hbomax:7.7.0' -H 'x-disco-params: realm=bolt,bid=beam,features=ar' -b "st=${Token}" 2>&1)
     local result=$(echo $tmpresult | json_query .data.attributes.currentLocationTerritory | tr -d '"')
     # The homepage returns 403 without a browser User-Agent. Supported regions are its locales plus the territories they cover.
-    local availableRegion=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL "https://www.hbomax.com/" 2>&1 | sed -n 's/.*id="__DOTCOM_GEO__">\([^<]*\)<\/script>.*/\1/p' | json_query -r '([.pageLocales.availableLocales[][:2]] | unique) as $c | ($c + [.brand.territory | to_entries[] | select(.key as $k | $c | index($k)) | .value[]]) | join(" ") | ascii_upcase')
+    local availableRegion=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL "https://www.hbomax.com/" 2>&1 | grep -Eo 'id="__DOTCOM_GEO__">[^<]*' | sed 's/^id="__DOTCOM_GEO__">//' | json_query -r '([.pageLocales.availableLocales[][:2]] | unique) as $c | ($c + [.brand.territory | to_entries[] | select(.key as $k | $c | index($k)) | .value[]]) | join(" ") | ascii_upcase')
     if [ -z "$availableRegion" ]; then
         echo -n -e "\r HBO Max:\t\t\t\t${Font_Red}Failed (Error: PAGE ERROR)${Font_Suffix}\n"
         return
@@ -1206,7 +1218,7 @@ function MediaUnlockTest_Salto() {
 }
 
 function MediaUnlockTest_LineTV.TW() {
-    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 "https://www.linetv.tw/drama/11829/eps/1" 2>&1)
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 "https://www.linetv.tw/drama/11829/eps/1" 2>&1 | keep_matches 'window\.__INITIAL_STATE__|"eps_info" *: *\[|"durationInMs" *: *[0-9]+')
     if [[ "$tmpresult" = "curl"* ]]; then
         print_network_failure "LineTV.TW:\t\t\t\t" "$1" "www.linetv.tw"
         return
@@ -1399,8 +1411,8 @@ function MediaUnlockTest_FOD() {
 }
 
 function MediaUnlockTest_YouTube_Premium() {
-    local tmpresult1=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} --max-time 10 -sSL -H "Accept-Language: en" -b "YSC=BiCUU3-5Gdk; CONSENT=YES+cb.20220301-11-p0.en+FX+700; GPS=1; VISITOR_INFO1_LIVE=4VwPMkB7W5A; PREF=tz=Asia.Shanghai; _gcl_au=1.1.1809531354.1646633279" "https://www.youtube.com/premium" 2>&1)
-    local tmpresult2=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} --max-time 10 -sSL -H "Accept-Language: en" "https://www.youtube.com/premium" 2>&1)
+    local tmpresult1=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} --max-time 10 -sSL -H "Accept-Language: en" -b "YSC=BiCUU3-5Gdk; CONSENT=YES+cb.20220301-11-p0.en+FX+700; GPS=1; VISITOR_INFO1_LIVE=4VwPMkB7W5A; PREF=tz=Asia.Shanghai; _gcl_au=1.1.1809531354.1646633279" "https://www.youtube.com/premium" 2>&1 | keep_matches 'www\.google\.cn|"countryCode" *: *"[^"]*"|purchaseButtonOverride|Start trial')
+    local tmpresult2=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} --max-time 10 -sSL -H "Accept-Language: en" "https://www.youtube.com/premium" 2>&1 | keep_matches 'www\.google\.cn|"countryCode" *: *"[^"]*"|purchaseButtonOverride|Start trial')
     local tmpresult="$tmpresult1:$tmpresult2"
 
     if [[ "$tmpresult" == "curl"* ]]; then
@@ -1500,14 +1512,14 @@ function MediaUnlockTest_BritBox() {
 }
 
 function MediaUnlockTest_PrimeVideo_Region() {
-    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 "https://www.primevideo.com" 2>&1)
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 "https://www.primevideo.com" 2>&1 | keep_matches '"currentTerritory":"[A-Z]{2}"')
 
     if [[ "$tmpresult" = "curl"* ]]; then
         print_network_failure "Amazon Prime Video:\t\t\t" "$1" "www.primevideo.com"
         return
     fi
 
-    local tmpresult1=$(curl $curlArgs -${1} --user-agent "PrimeVideo/10.68 (iPad; iOS 18.3.2; Scale/2.00)" -sSL --max-time 10 "https://ab9f7h23rcdn.eu.api.amazonvideo.com/cdp/appleedge/getDataByTransform/v1/apple/detail/vod/v1.kt?itemId=amzn1.dv.gti.e6b39984-2bb6-f7d0-33e4-08ec574947f0&deviceId=6F97F9CCFA2243F1A3C44BD3C7F7908E&deviceTypeId=A3JTVZS31ZJ340&density=2x&firmware=10.6800.16104.3&format=json&enabledFeatures=denarius.location.gen4.daric.siglos.siglosPartnerBilling.contentDescriptors.contentDescriptorsV2.productPlacement.zeno.seriesSearch.tapsV2.dateTimeLocalization.multiSourcedEvents.mseEventLevelOffers.liveWatchModal.lbv.daapi.maturityRatingDecoration.seasonTrailer.cleanSlate.xbdModalV2.xbdModalVdp.playbackPinV2.exploreTab.reactions.progBadging.atfEpTimeVis.prereleaseCx.vppaConsent.episodicRelease.movieVam.movieVamCatalog&journeyIngressContext=8%7CEgRzdm9k&osLocale=en_US&timeZoneId=Etc%2FUtc&uxLocale=en_US" 2>&1)
+    local tmpresult1=$(curl $curlArgs -${1} --user-agent "PrimeVideo/10.68 (iPad; iOS 18.3.2; Scale/2.00)" -sSL --max-time 10 "https://ab9f7h23rcdn.eu.api.amazonvideo.com/cdp/appleedge/getDataByTransform/v1/apple/detail/vod/v1.kt?itemId=amzn1.dv.gti.e6b39984-2bb6-f7d0-33e4-08ec574947f0&deviceId=6F97F9CCFA2243F1A3C44BD3C7F7908E&deviceTypeId=A3JTVZS31ZJ340&density=2x&firmware=10.6800.16104.3&format=json&enabledFeatures=denarius.location.gen4.daric.siglos.siglosPartnerBilling.contentDescriptors.contentDescriptorsV2.productPlacement.zeno.seriesSearch.tapsV2.dateTimeLocalization.multiSourcedEvents.mseEventLevelOffers.liveWatchModal.lbv.daapi.maturityRatingDecoration.seasonTrailer.cleanSlate.xbdModalV2.xbdModalVdp.playbackPinV2.exploreTab.reactions.progBadging.atfEpTimeVis.prereleaseCx.vppaConsent.episodicRelease.movieVam.movieVamCatalog&journeyIngressContext=8%7CEgRzdm9k&osLocale=en_US&timeZoneId=Etc%2FUtc&uxLocale=en_US" 2>&1 | keep_matches 'VPN')
     if [[ "$tmpresult1" = "curl"* ]]; then
         print_network_failure "Amazon Prime Video:\t\t\t" "$1" "ab9f7h23rcdn.eu.api.amazonvideo.com"
         return
@@ -2138,7 +2150,7 @@ function MediaUnlockTest_CBCGem() {
         return
     fi
 
-    local result=$(echo $tmpresult | sed 's/.*country":"//' | cut -f1 -d"}" | cut -f1 -d'"')
+    local result=$(echo "$tmpresult" | grep -Eo 'country":"[^"}]*' | tail -n 1 | sed 's/.*"//')
     if [[ "$result" == "CA" ]]; then
         echo -n -e "\r CBC Gem:\t\t\t\t${Font_Green}Yes${Font_Suffix}\n"
         return
@@ -3096,7 +3108,7 @@ function MediaUnlockTest_Philo(){
 }
 
 function MediaUnlockTest_FXNOW(){
-    local tmpresult=$(curl $curlArgs -${1} -fsSL --user-agent "${UA_Browser}" --max-time 10 "https://fxnow.fxnetworks.com/" 2>&1)
+    local tmpresult=$(curl $curlArgs -${1} -fsSL --user-agent "${UA_Browser}" --max-time 10 "https://fxnow.fxnetworks.com/" 2>&1 | keep_matches 'is not accessible')
     if [[ "$tmpresult" == "curl"* ]]; then
         print_network_failure "FXNOW:\t\t\t\t\t" "$1" "fxnow.fxnetworks.com"
         return
@@ -3138,7 +3150,7 @@ function MediaUnlockTest_CWTV(){
 }
 
 function MediaUnlockTest_Shudder(){
-    local tmpresult=$(curl $curlArgs -${1} -sS --user-agent "${UA_Browser}" --max-time 10 "https://www.shudder.com/" 2>&1)
+    local tmpresult=$(curl $curlArgs -${1} -sS --user-agent "${UA_Browser}" --max-time 10 "https://www.shudder.com/" 2>&1 | keep_matches 'not available')
     if [[ "$tmpresult" == "curl"* ]]; then
         print_network_failure "Shudder:\t\t\t\t" "$1" "www.shudder.com"
         return
@@ -3791,7 +3803,7 @@ function WebTest_GoogleSearchCAPTCHA() {
 function MediaUnlockTest_GooglePlayStore() {
     local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 -w '\n%{http_code}' "https://play.google.com/store/games" \
         -H 'accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7' \
-        -H 'accept-language: en-US;q=0.9' -H 'sec-fetch-dest: document' -H 'sec-fetch-mode: navigate' -H 'sec-fetch-site: none' -H 'sec-fetch-user: ?1' -H 'upgrade-insecure-requests: 1' 2>&1)
+        -H 'accept-language: en-US;q=0.9' -H 'sec-fetch-dest: document' -H 'sec-fetch-mode: navigate' -H 'sec-fetch-site: none' -H 'sec-fetch-user: ?1' -H 'upgrade-insecure-requests: 1' 2>&1 | keep_matches '"zQmIje" *: *"[^"]+"|<div class="yVZQTb">[^<(]+|^[0-9]{3}$')
     if [[ "$tmpresult" == "curl"* ]]; then
         print_network_failure "Google Play Store:\t\t\t" "$1" "play.google.com"
         return
@@ -3817,7 +3829,7 @@ function MediaUnlockTest_GooglePlayStore() {
 }
 
 function MediaUnlockTest_GoogleGemini() {
-    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 -w '\n%{http_code}' "https://gemini.google.com" 2>&1)
+    local tmpresult=$(curl $curlArgs -${1} --user-agent "${UA_Browser}" -sSL --max-time 10 -w '\n%{http_code}' "https://gemini.google.com" 2>&1 | keep_matches ',2,1,200,"[A-Z]{3}"|45631641,null,true|45617354,null,true|^[0-9]{3}$')
     if [[ "$tmpresult" == "curl"* ]]; then
         print_network_failure "Google Gemini:\t\t\t\t" "$1" "gemini.google.com"
         return
@@ -3869,7 +3881,7 @@ function MediaUnlockTest_NHKPlus() {
 }
 
 function MediaUnlockTest_Tiktok() {
-    local page=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} -fsSL --max-time 10 -w '\n%{url_effective}' "https://www.tiktok.com/" 2>&1)
+    local page=$(curl $curlArgs --user-agent "${UA_Browser}" -${1} -fsSL --max-time 10 -w '\n%{url_effective}' "https://www.tiktok.com/" 2>&1 | keep_matches '"(storeRegion|region)":"[A-Za-z]{2}"|^https?://[^ ]*$')
     if [[ "$page" == "curl"* ]]; then
         print_network_failure "Tiktok:\t\t\t\t" "$1" "www.tiktok.com"
         return
@@ -4557,7 +4569,8 @@ function MediaUnlockTest_Apple() {
 function MediaUnlockTest_Facebook() {
     local cookiejar=$(mktemp)
     local fbArgs=(--user-agent "${UA_Browser}" -sS --max-time 10 -b "$cookiejar" -c "$cookiejar" -H 'accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' -H 'accept-language: en-US,en;q=0.9' -H 'sec-fetch-dest: document' -H 'sec-fetch-mode: navigate' -H 'sec-fetch-site: none' -H 'sec-fetch-user: ?1' -H 'upgrade-insecure-requests: 1')
-    local tmpresult=$(curl $curlArgs -${1} "${fbArgs[@]}" "https://www.facebook.com/ads/library/" 2>&1)
+    local fbKeep="/__rd_verify_[^'\"]*|\"AdsCurrentUser\",\[\],\{[^}]*\"countryCode\":\"[A-Z]{2}\"|\"defaultCountry\":\"[A-Z]{2}\""
+    local tmpresult=$(curl $curlArgs -${1} "${fbArgs[@]}" "https://www.facebook.com/ads/library/" 2>&1 | keep_matches "$fbKeep")
     if [[ "$tmpresult" == "curl"* ]]; then
         rm -f "$cookiejar"
         print_network_failure "Facebook:\t\t\t\t" "$1" "www.facebook.com"
@@ -4567,7 +4580,7 @@ function MediaUnlockTest_Facebook() {
     local verify=$(echo "$tmpresult" | grep -o "/__rd_verify_[^'\"]*" | head -n1)
     if [ -n "$verify" ]; then
         curl $curlArgs -${1} --user-agent "${UA_Browser}" -sS --max-time 10 -b "$cookiejar" -c "$cookiejar" -X POST -o /dev/null "https://www.facebook.com${verify}" 2>/dev/null
-        tmpresult=$(curl $curlArgs -${1} "${fbArgs[@]}" -L "https://www.facebook.com/ads/library/" 2>&1)
+        tmpresult=$(curl $curlArgs -${1} "${fbArgs[@]}" -L "https://www.facebook.com/ads/library/" 2>&1 | keep_matches "$fbKeep")
     fi
     rm -f "$cookiejar"
     if [[ "$tmpresult" == "curl"* ]]; then
